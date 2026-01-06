@@ -1,0 +1,29 @@
+# --- keonOS Build Artifacts ---
+
+# Object files and dependency files
+*.o
+*.d
+
+# Compiled binaries and ISO images
+*.bin
+*.iso
+*.img
+
+# Build directories
+iso/
+build/
+
+# --- Emulator & Debugging ---
+
+# QEMU logs and state
+qemu.log
+
+# --- OS Specific / IDEs ---
+
+# macOS junk
+.DS_Store
+
+# VS Code or CLion settings
+.vscode/
+.idea/
+cmake-build-*/
