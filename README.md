@@ -64,3 +64,24 @@ There's also
 ```bash
 make clean  # Cleans all the object files, the ISO and the logs (qemu.log)
 ```
+
+## 📝 License
+
+**keonOS** is licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** license.
+
+Copyright (c) 2024-2026 fmDXP/fmdxp (keonOS Developer)
+
+You are free to:
+
+- **Share** - copy and redistribute the material in any medium or format.
+- **Adapt** - remix, transform, and build upon the material.
+
+Under the following terms:
+
+1. **Attribution** - You must give appropriate credit, provide a link to the original repository, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.
+2. **NonCommercial** - You may not use the material for commercial purposes or business ventures.
+3. **ShareAlike** - If you remix, transform, or build upon the material, you must distribute your contributions under the same license.
+4. **No Rebranding for Distribution** - You may not rebrand KeonOS or distribute it under a different name for purposes other than personal educational research.
+
+The software is provided "AS IS", without warranty of any kind.
+For full license text, visit: [CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/)
