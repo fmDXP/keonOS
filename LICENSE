@@ -404,6 +404,14 @@ where to find the applicable terms.
 form of a separately written license, or stated as exceptions;
 the above requirements apply either way.
 
+In accordance with Section 7 of the GNU General Public License, version 3 , the following additional terms apply to the material authored by fmdxp within this project:
+
+* Mandatory Attribution: You must preserve all original author attributions, legal notices, and copyright headers in the source code.
+* Origin Misrepresentation: You are prohibited from misrepresenting the origin of this material. Modified versions must be clearly marked as different from the original to prevent errors from being attributed to the original author.
+* Publicity and Names: You may not use the name of the author (fmdxp) or the project name (keonOS) for publicity or promotional purposes without explicit permission.
+* Display of Legal Notices: If the software provides an interactive user interface (such as the keonOS shell), it must display Appropriate Legal Notices, including the original copyright and the absence of warranty.
+* Trademark Rights: No rights are granted for the use of any trade names, trademarks, or service marks associated with the project.
+
   8. Termination.
 
   You may not propagate or modify a covered work except as expressly
