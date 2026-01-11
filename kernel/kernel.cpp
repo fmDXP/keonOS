@@ -1,3 +1,23 @@
+/*
+ * keonOS - kernel/kernel.cpp
+ * Copyright (C) 2025-2026 fmdxp
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ADDITIONAL TERMS (Per Section 7 of the GNU GPLv3):
+ * - Original author attributions must be preserved in all copies.
+ * - Modified versions must be marked as different from the original.
+ * - The name "keonOS" or "fmdxp" cannot be used for publicity without permission.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ */
+
 #include <kernel/constants.h>
 #include <kernel/kernel.h>
 #include <kernel/shell.h>
@@ -140,7 +160,7 @@ extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info)
 	printf(" |   <  __/ (_) | | | | |_| |___) |\n");
 	printf(" |_|\\_\\___|\\___/|_| |_|\\___/|____/\n\n\n");
 	
-	timer_sleep(1000);	 // Brief pause to let the user see the logo
+	timer_sleep(500);	 // Brief pause to let the user see the logo
 	
 	terminal_clear();
 	terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
@@ -162,28 +182,19 @@ extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info)
 	printf("[*] Initialized Threads\n");
 	printf("[*] Initialized Keyboard\n");
 	printf("[*] Initialized Shell\n");
-	printf("[*] Initialized KeonFS (ramfs)\n");
+	printf("[*] Initialized KeonFS\n");
 	
 	// Display detected RAM size
 	if (info->flags & (1 << 0))
 		printf("Memory found: %d MB\n\n\n\n", (total_mem_bytes / 1024) / 1024);
 
 
+	// Show the user the OS's copyrights
+	printf("keonOS version %s (alpha)\n", OS_VERSION_STRING_NO_NAME);
+	printf("Copyright (C) 2026 fmdxp. Licensed under a custom GNU GPLv3.\n");
+	printf("This program comes with ABSOLUTELY NO WARRANTY.\n\n");
+	printf("Type 'help' for commands.\n");
 
-	FILE* f = fopen("/initrd/test.txt", "r");
-	if (!f) printf("[ERROR] fopen failed! Check file path or mount.\n");
-	else 
-	{
-		char c;
-		printf("Contents of /initd/test.txt: ");
-		while (fread(&c, 1, 1, f) == 1) 
-			putchar(c);
-		
-		printf("\n");
-
-		fclose(f);
-	}
-	
 	// 7. Launch First User Process
     // Initialize the shell and add it as the primary thread to the scheduler
 	shell_init();

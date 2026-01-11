@@ -1,3 +1,23 @@
+/*
+ * keonOS - include/kernel/constants.h
+ * Copyright (C) 2025-2026 fmdxp
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ADDITIONAL TERMS (Per Section 7 of the GNU GPLv3):
+ * - Original author attributions must be preserved in all copies.
+ * - Modified versions must be marked as different from the original.
+ * - The name "keonOS" or "fmdxp" cannot be used for publicity without permission.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ */
+
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
@@ -6,9 +26,10 @@
 #define OS_NAME				"keonOS"
 #define OS_VERSION_MAJOR	"0"
 #define OS_VERSION_MINOR	"2"
-#define OS_VERSION_PATCH	" "			// Uses letters
+#define OS_VERSION_PATCH	"a"			// Uses letters
 
-#define OS_VERSION_STRING 	OS_NAME " v" OS_VERSION_MAJOR "." OS_VERSION_MINOR OS_VERSION_PATCH
+#define OS_VERSION_STRING 			OS_NAME " v" OS_VERSION_MAJOR "." OS_VERSION_MINOR OS_VERSION_PATCH
+#define OS_VERSION_STRING_NO_NAME 	OS_VERSION_MAJOR "." OS_VERSION_MINOR OS_VERSION_PATCH
 
 
 
