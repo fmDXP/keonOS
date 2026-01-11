@@ -65,23 +65,19 @@ There's also
 make clean  # Cleans all the object files, the ISO and the logs (qemu.log)
 ```
 
+---
+
 ## 📝 License
 
-**keonOS** is licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** license.
+keonOS is licensed under the GNU General Public License v3.0 (GPLv3) with Additional Terms as permitted by Section 7 of the license.
 
-Copyright (c) 2024-2026 fmDXP/fmdxp (keonOS Developer)
+Copyright (c) 2025-2026 fmdxp
+Additional Terms (Per Section 7 of the GNU GPLv3):
 
-You are free to:
+* Attribution: Original author attributions (fmdxp) must be preserved in all copies and substantial portions of the software.
 
-- **Share** - copy and redistribute the material in any medium or format.
-- **Adapt** - remix, transform, and build upon the material.
+* Modifications: Modified versions must be clearly marked as different from the original version.
 
-Under the following terms:
+* Branding: The name "keonOS" or the author's name "fmdxp" cannot be used for publicity or promotional purposes without explicit prior written permission.
 
-1. **Attribution** - You must give appropriate credit, provide a link to the original repository, and indicate if changes were made. You may do so in any reasonable manner, but not in any way that suggests the licensor endorses you or your use.
-2. **NonCommercial** - You may not use the material for commercial purposes or business ventures.
-3. **ShareAlike** - If you remix, transform, or build upon the material, you must distribute your contributions under the same license.
-4. **No Rebranding for Distribution** - You may not rebrand KeonOS or distribute it under a different name for purposes other than personal educational research.
-
-The software is provided "AS IS", without warranty of any kind.
-For full license text, visit: [CC BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/)
+The software is provided "AS IS", without warranty of any kind. See the LICENSE file for the full text of the GPLv3.
