@@ -18,8 +18,8 @@
  * See the GNU General Public License for more details.
  */
 
+#include <kernel/arch/x86_64/thread.h>
 #include <drivers/keyboard.h>
-#include <proc/thread.h>
 #include <stdint.h>
 
 static bool shift_pressed = false;

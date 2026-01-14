@@ -1,5 +1,5 @@
 /*
- * keonOS - mm/paging.cpp
+ * keonOS - kernel/arch/i386/paging.cpp
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify

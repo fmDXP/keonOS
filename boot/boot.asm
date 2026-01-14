@@ -18,12 +18,24 @@
 ; * See the GNU General Public License for more details.
 ; *****************************************************************************
 
+
+bits 32
+
 section .multiboot
-align 4
-	; Multiboot header
-    dd 0x1BADB002             			; MAGIC
-    dd 0x00000003             			; FLAGS (ALIGNED + MEMINFO)
-    dd -(0x1BADB002 + 0x00000003) 		; CHECKSUM
+align 8
+
+multiboot_header_start:
+    dd 0xe85250d6
+    dd 0             			
+    dd multiboot_header_end - multiboot_header_start
+    dd -(0xe85250d6 + 0 + (multiboot_header_end - multiboot_header_start))
+
+    dw 0    ; type
+    dw 0    ; flags
+    dd 8    ; size
+
+multiboot_header_end:
+
 
 section .boot
 global _start
@@ -33,85 +45,105 @@ global multiboot_magic
 global multiboot_info_ptr
 
 
-VM_BASE         equ 0xC0000000
-PDE_INDEX       equ (VM_BASE >> 22)
+VM_OFFSET       equ 0xFFFFFFFF80000000
 
 _start:
-	mov esp, (_stack_low_top - VM_BASE)
+    mov esi, ebx
+    mov edi, eax
 
-	mov edi, (multiboot_magic - VM_BASE)
-	mov [edi], eax
-	mov edi, (multiboot_info_ptr - VM_BASE)
-	mov [edi], ebx
+	mov esp, (stack_top - VM_OFFSET)
 
+	mov eax, pdpt_table - VM_OFFSET
+    or eax, 0b11
+    mov [(pml4_table - VM_OFFSET)], eax       
+    mov [(pml4_table - VM_OFFSET) + 511*8], eax
 
-	mov edi, (boot_page_directory - VM_BASE)
-
-	mov ecx, 0
-
-.setup_pd:
-    mov eax, (boot_page_table - VM_BASE)
-    mov edx, ecx
-    shl edx, 12
-    add eax, edx
-    or eax, 0x003
-
-    mov [edi + ecx * 4], eax
-    mov [edi + (PDE_INDEX + ecx) * 4], eax
-
-    inc ecx
-    cmp ecx, 128
-    jne .setup_pd
+    mov eax, pd_table - VM_OFFSET
+    or eax, 0b11
+    mov [(pdpt_table - VM_OFFSET)], eax
+    mov [(pdpt_table - VM_OFFSET) + 510*8], eax
 
     mov ecx, 0
-    mov edx, (boot_page_table - VM_BASE)
 
-.fill_pt:
-    mov eax, ecx
-    shl eax, 12                                 
-    or eax, 0x003  
-    mov [edx + ecx * 4], eax
 
+.map_pd:
+    mov eax, 0x200000
+    mul ecx
+    or eax, 0b10000011 
+    mov [(pd_table - VM_OFFSET) + ecx*8], eax
     inc ecx
-    cmp ecx, 131072
-    jne .fill_pt
+    cmp ecx, 512
+    jne .map_pd
 
-    mov eax, (boot_page_directory - VM_BASE)
-    mov cr3, eax    
+    mov eax, cr4
+    or eax, 1 << 5
+    mov cr4, eax
 
+    mov ecx, 0xC0000080
+    rdmsr
+    or eax, 1 << 8
+    wrmsr
+
+    mov eax, pml4_table - VM_OFFSET
+    mov cr3, eax
     mov eax, cr0
-    or eax, 0x80000001  
+    or eax, 1 << 31
     mov cr0, eax
 
-    lea eax, [.higher_half]
-    jmp eax
+    lgdt [gdt64.ptr - VM_OFFSET]
+
+    push gdt64.code
+    push long_mode_high
+    retf
 
 
+bits 64
+long_mode_high:
+    lgdt [gdt64_ptr_virt]
 
-.higher_half:
-    mov esp, _stack_low_top
+    mov ax, 0
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    mov rsp, stack_top
+    sub rsp, 8
     
-    push ebx
-    push eax
+    mov rdi, rdi
+    mov rsi, rsi
+
+    mov [multiboot_magic], edi
+    mov [multiboot_info_ptr], rsi
+
     call kernel_main
 
-    cli
-
 .hang:
-	hlt
-	jmp .hang
+    hlt
+    jmp .hang
 
 
 section .bss
 align 4096
-boot_page_directory: 	resb 4096
-boot_page_table:        resb 524288
-_stack_low_bottom: 		resb 16384
-_stack_low_top:
+pml4_table: resb 4096
+pdpt_table: resb 4096
+pd_table:   resb 4096
+stack_bottom: resb 65536
+stack_top:
 
-global _stack_low_bottom
-global _stack_low_top
-
-; Reserve storage for Multiboot data to be accessed from C++ code
 multiboot_magic:    resd 1
-multiboot_info_ptr: resd 1
+multiboot_info_ptr: resq 1
+
+section .rodata
+gdt64:
+    dq 0
+.code: equ $ - gdt64
+    dq (1<<43) | (1<<44) | (1<<47) | (1<<53)
+.ptr:
+    dw $ - gdt64 - 1
+    dq gdt64 - VM_OFFSET
+    
+gdt64_ptr_virt:
+    dw $ - gdt64 - 1
+    dq gdt64

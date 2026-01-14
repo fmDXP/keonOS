@@ -1,5 +1,5 @@
 /*
- * keonOS - include/proc/thread.h
+ * keonOS - include/kernel/arch/x86_64/thread.h
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@
  * See the GNU General Public License for more details.
  */
 
-#ifndef THREAD_H
+ #ifndef THREAD_H
 #define THREAD_H
 
 #include <stdint.h>
@@ -29,44 +29,47 @@ enum thread_state_t
     THREAD_READY,
     THREAD_SLEEPING,
     THREAD_BLOCKED,
+    THREAD_ZOMBIE
 };
 
 struct thread_t 
 {
-    uint32_t* esp;
+    uint64_t* rsp;
     uint32_t  id;
     char      name[16];
-    uint32_t* stack_start;
+    uint64_t* stack_start;
     thread_t* next;
     thread_state_t state;
     uint32_t sleep_ticks;
+    int      exit_code;
 };
 
 typedef struct 
 {
     volatile int locked;
-    uint32_t eflags;
+    uint64_t rflags;
 } spinlock_t;
 
 
-extern "C" void switch_context(uint32_t** old_esp, uint32_t** new_esp);
+extern "C" void switch_context(uint64_t** old_rsp, uint64_t* new_rsp);
 
 void thread_init();
+void idle_task();
+extern "C" void yield();
+void thread_exit(int code);
+thread_t* thread_create(void (*entry_point)(), const char* name);
+thread_t* thread_add(void(*entry_point)(), const char* name);
+bool      thread_kill(uint32_t id);
+void      thread_sleep(uint32_t ms);
+void      thread_wakeup_blocked();
+thread_t* thread_get_current();
+thread_t* get_idle_thread_ptr();
+void      thread_print_list();
+uint32_t  thread_get_id_by_name(const char* name);
 void spin_lock(spinlock_t* lock);
 void spin_unlock(spinlock_t* lock);
 void spin_lock_irqsave(spinlock_t* lock);
 void spin_unlock_irqrestore(spinlock_t* lock);
-void thread_sleep(uint32_t ms);
-void thread_wakeup_blocked();
-thread_t* thread_add(void(*entry_point)(), const char* name);
-thread_t* thread_create(void (*entry_point)(), const char* name);
-extern "C" void yield();
-void idle_task();
-thread_t* thread_get_current();
-thread_t* get_idle_thread_ptr();
-void thread_print_list();
-bool thread_kill(uint32_t id);
-uint32_t thread_get_id_by_name(const char* name);
-void thread_exit();
+void cleanup_zombies();
 
 #endif      // THREAD_H

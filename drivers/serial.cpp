@@ -19,7 +19,7 @@
  */
 
 
-#include <kernel/arch/i386/idt.h>
+#include <kernel/arch/x86_64/idt.h>
 #include <kernel/constants.h>
 #include <drivers/serial.h>
 

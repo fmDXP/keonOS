@@ -18,7 +18,6 @@
  * See the GNU General Public License for more details.
  */
 
-
 #ifndef _KERNEL_GDT_H
 #define _KERNEL_GDT_H
 

@@ -1,5 +1,5 @@
 /*
- * keonOS - proc/thread.cpp
+ * keonOS - kernel/arch/i386/thread.cpp
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,8 +18,8 @@
  * See the GNU General Public License for more details.
  */
 
+#include <kernel/arch/i386/thread.h>
 #include <drivers/vga.h>
-#include <proc/thread.h>
 #include <mm/heap.h>
 #include <string.h>
 #include <stdlib.h>

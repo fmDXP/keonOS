@@ -18,19 +18,22 @@
  * See the GNU General Public License for more details.
  */
 
+#define KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000
+
 #include <kernel/constants.h>
 #include <kernel/kernel.h>
 #include <kernel/shell.h>
 #include <kernel/error.h>
 #include <kernel/panic.h>
 
-#include <kernel/arch/i386/constructor.h>
-#include <kernel/arch/i386/gdt.h>
-#include <kernel/arch/i386/idt.h>
+#include <kernel/arch/x86_64/constructor.h>
+#include <kernel/arch/x86_64/paging.h>
+#include <kernel/arch/x86_64/thread.h>
+#include <kernel/arch/x86_64/gdt.h>
+#include <kernel/arch/x86_64/idt.h>
 
 #include <mm/vmm.h>
 #include <mm/heap.h>
-#include <mm/paging.h>
 
 #include <fs/vfs.h>
 #include <fs/ramfs.h>
@@ -42,9 +45,7 @@
 #include <drivers/serial.h>
 #include <drivers/speaker.h>
 #include <drivers/keyboard.h>
-#include <drivers/multiboot.h>
-
-#include <proc/thread.h>
+#include <drivers/multiboot2.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,94 +54,94 @@
 
 extern "C" uint32_t _kernel_end;
 
-extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info)
+extern "C" void kernel_main([[maybe_unused]] uint64_t magic, uint64_t multiboot_phys_addr)
 {
+	uintptr_t multiboot_virt_addr = multiboot_phys_addr + KERNEL_VIRTUAL_OFFSET;
+
 	// 1. Core Architecture Setup
-    // Initialize C++ global constructors, terminal output, and CPU tables (GDT/IDT)
 	initialize_constructors();
 	terminal_initialize();
 	serial_install();
 	gdt_init();
 	idt_init();
 
+	uint64_t total_mem_bytes = 0;
+    uintptr_t rd_phys = 0;
+    uint32_t rd_size = 0;
+	uint32_t mods_count = 0;
+
+	multiboot_tag *tag;
+    for (tag = (multiboot_tag*)(multiboot_virt_addr + 8);
+         tag->type != MULTIBOOT_TAG_TYPE_END;
+         tag = (multiboot_tag*)((uint8_t*)tag + ((tag->size + 7) & ~7))) 
+    {
+        switch (tag->type) 
+		{
+            case MULTIBOOT_TAG_TYPE_BASIC_MEMINFO: 
+			{
+                auto mem_tag = (multiboot_tag_basic_meminfo *)tag;
+                total_mem_bytes = (mem_tag->mem_lower + mem_tag->mem_upper) * 1024;
+                break;
+            }
+            case MULTIBOOT_TAG_TYPE_MODULE: 
+            {
+                auto mod_tag = (multiboot_tag_module *)tag;
+                rd_phys = mod_tag->mod_start;
+                rd_size = mod_tag->mod_end - mod_tag->mod_start;
+				mods_count++;
+                break;
+            }
+        }
+    }
+
+
 	// 2. Memory Management Setup
     // Disable interrupts during critical memory initialization
 	asm volatile("cli");
 	
-	// Calculate total system memory using information passed by the Multiboot bootloader
-	uint32_t total_mem_bytes = (info->mem_lower + info->mem_upper) * 1024;
-	
-
-	uint32_t rd_phys = 0;
-	uint32_t rd_size = 0;
-	if (info->mods_count > 0) 
-	{
-		multiboot_module_t* m = (multiboot_module_t*)info->mods_addr;
-		rd_phys = m[0].mod_start;
-		rd_size = m[0].mod_end - m[0].mod_start;
-	}
-		
-
-	// Enable Paging: This maps physical memory to virtual memory addresses
+	pfa_init_from_multiboot2((void*)multiboot_virt_addr);
 	paging_init();	
-	
-	// 3. Dynamic Memory (Heap) Initialization
-    // Define the starting point of the heap and allocate an initial 16MB block
+
 	void* heap_start = (void*)VMM::kernel_dynamic_break;
-	uint32_t initial_heap_size = 4 * 1024 * 1024;	// 4MB
-	
-	// Expand the virtual address space and initialize the kernel heap allocator
+    uintptr_t initial_heap_size = 4 * 1024 * 1024;
+		
 	VMM::sbrk(initial_heap_size);
 	kheap_init(heap_start, initial_heap_size);
-	
+
+
 	
 	// 4. Subsystem Initialization
-    // Initialize the Programmable Interval Timer (PIT) at 100Hz
 	timer_init(100);
-	
-	// Setup the threading system (Scheduler) and the keyboard driver
 	thread_init();
 	keyboard_init();
 
 
-	printf("mods_count = %d\n", info->mods_count);
-	printf("mods_addr  = %x\n", info->mods_addr);
-
 	void* ramdisk_vaddr = nullptr;
-	KeonFS_MountNode* ramfs_ptr = nullptr;
-
 	if (rd_phys != 0) 
-	{
-		size_t rd_pages = (rd_size + 4095) / 4096;
-		ramdisk_vaddr = (void*)0xE0000000;
+    {
+        size_t rd_pages = (rd_size + 4095) / 4096;
+        ramdisk_vaddr = (void*)0xFFFFFFFFE0000000;
 
-		for(size_t i = 0; i < rd_pages; i++)
-		{
-			paging_map_page(
-				(void*)((uintptr_t)ramdisk_vaddr + (i * PAGE_SIZE)), 
-				(void*)(rd_phys + (i * PAGE_SIZE)), 
-				PTE_PRESENT, 
-				true
-        	);
-    	}
+        for(size_t i = 0; i < rd_pages; i++)
+        {
+            paging_map_page(
+                (void*)((uintptr_t)ramdisk_vaddr + (i * PAGE_SIZE)), 
+                (void*)(rd_phys + (i * PAGE_SIZE)), 
+                PTE_PRESENT | PTE_RW
+            );
+        }
 
-		KeonFS_Info* fs_info = (KeonFS_Info*)ramdisk_vaddr;
-		if (fs_info->magic != KEONFS_MAGIC)
-			panic(KernelError::K_ERR_RAMFS_MAGIC_FAILED, "Ramfs not found at 0xE0000000");
-	}
+        KeonFS_Info* fs_info = (KeonFS_Info*)ramdisk_vaddr;
+        if (fs_info->magic != KEONFS_MAGIC)
+            panic(KernelError::K_ERR_RAMFS_MAGIC_FAILED, "RAMFS not found or wrong magic");
+    }
 
 	vfs_init();
 	if (ramdisk_vaddr != nullptr) 
-	{
-		ramfs_ptr = new KeonFS_MountNode("initrd", ramdisk_vaddr);
-		KeonFS_FileHeader* hdr = (KeonFS_FileHeader*)((uintptr_t)ramfs_ptr->base + sizeof(KeonFS_Info));
-
-		if (ramfs_ptr->info->magic != KEONFS_MAGIC)
-        	panic(KernelError::K_ERR_RAMFS_MAGIC_FAILED, "Magic corrupt after constructor!");
-    	
-		uint32_t* magic_ptr = (uint32_t*)ramdisk_vaddr;
-		vfs_mount(ramfs_ptr);
-	}
+    {
+        KeonFS_MountNode* ramfs_ptr = new KeonFS_MountNode("initrd", ramdisk_vaddr);
+        vfs_mount(ramfs_ptr);
+    }
 		
 
 	// Re-enable interrupts after safe hardware/memory setup
@@ -151,7 +152,6 @@ extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info)
     // Show the boot splash screen and provide visual/auditory feedback (beep)
 	terminal_clear();
 	terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
-	
 	beep(900, 100);
 	
 	printf("  _                     ___  ____ \n");
@@ -160,33 +160,16 @@ extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info)
 	printf(" |   <  __/ (_) | | | | |_| |___) |\n");
 	printf(" |_|\\_\\___|\\___/|_| |_|\\___/|____/\n\n\n");
 	
-	timer_sleep(500);	 // Brief pause to let the user see the logo
-	
+	timer_sleep(500);
 	terminal_clear();
-	terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-	beep(900, 25);
-	
-	terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+
 	printf("\n				-- keonOS --\n\n\n");
 	terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 
-
-	// 6. System Status Reporting
-    // Log initialization results and verify Multiboot integrity
-	printf("[*] Initialized Global Constructors\n");
-	printf("[*] Initialized Terminal\n");
-	printf("[*] Initialized GDT\n");
-	printf("[*] Initialized Heap\n");
-	printf("[*] Initialized IDT\n");
-	printf("[*] Initialized Timer\n");
-	printf("[*] Initialized Threads\n");
-	printf("[*] Initialized Keyboard\n");
-	printf("[*] Initialized Shell\n");
-	printf("[*] Initialized KeonFS\n");
 	
 	// Display detected RAM size
-	if (info->flags & (1 << 0))
-		printf("Memory found: %d MB\n\n\n\n", (total_mem_bytes / 1024) / 1024);
+	if (total_mem_bytes)
+		printf("Memory found: %llu MB\n\n", (total_mem_bytes / 1024) / 1024);
 
 
 	// Show the user the OS's copyrights
@@ -194,6 +177,7 @@ extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info)
 	printf("Copyright (C) 2026 fmdxp. Licensed under a custom GNU GPLv3.\n");
 	printf("This program comes with ABSOLUTELY NO WARRANTY.\n\n");
 	printf("Type 'help' for commands.\n");
+
 
 	// 7. Launch First User Process
     // Initialize the shell and add it as the primary thread to the scheduler

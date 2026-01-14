@@ -1,5 +1,5 @@
 /*
- * keonOS - libc/stdlib/itoa.cpp
+ * keonOS - libc/stdlib/ulltoa.cpp
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -20,34 +20,36 @@
 
 #include <stdlib.h>
 
-char* itoa(uint64_t value, char* str, int base) 
+char* ulltoa(unsigned long long value, char* str, int base)
 {
-    char* ptr = str;
-    char* ptr1 = str;
-    char tmp_char;
-    uint64_t tmp_value;
+    char* rc;
+    char* ptr;
+    char* low;
+    const char* digits = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-    if (value == 0) 
+    rc = ptr = str;
+    
+    if (base < 2 || base > 36) 
     {
-        *ptr++ = '0';
         *ptr = '\0';
         return str;
     }
-    
-    while (value != 0) 
-    {
-        tmp_value = value;
-        value /= base;
-        *ptr++ = "0123456789abcdef"[tmp_value % base];
-    }
 
-    *ptr-- = '\0';
-    
-    while (ptr1 < ptr) 
+    do 
     {
-        tmp_char = *ptr;
-        *ptr-- = *ptr1;
-        *ptr1++ = tmp_char;
+        *ptr++ = digits[value % base];
+        value /= base;
+    } while (value);
+
+    *ptr = '\0';
+    low = rc;
+    ptr--;
+
+    while (low < ptr) 
+    {
+        char tmp = *low;
+        *low++ = *ptr;
+        *ptr-- = tmp;
     }
 
     return str;

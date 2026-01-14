@@ -1,5 +1,5 @@
 /*
- * keonOS - libc/stdlib/itoa.cpp
+ * keonOS - include/kernel/arch/x86_64/constructor.h
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,37 +18,25 @@
  * See the GNU General Public License for more details.
  */
 
-#include <stdlib.h>
+#ifndef CONSTRUCTOR_H
+#define CONSTRUCTOR_H
 
-char* itoa(uint64_t value, char* str, int base) 
-{
-    char* ptr = str;
-    char* ptr1 = str;
-    char tmp_char;
-    uint64_t tmp_value;
+#include <stdint.h>
 
-    if (value == 0) 
-    {
-        *ptr++ = '0';
-        *ptr = '\0';
-        return str;
-    }
-    
-    while (value != 0) 
-    {
-        tmp_value = value;
-        value /= base;
-        *ptr++ = "0123456789abcdef"[tmp_value % base];
-    }
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-    *ptr-- = '\0';
-    
-    while (ptr1 < ptr) 
-    {
-        tmp_char = *ptr;
-        *ptr-- = *ptr1;
-        *ptr1++ = tmp_char;
-    }
+typedef void (*constructor)();
 
-    return str;
+void initialize_constructors(void);
+
+int __cxa_guard_acquire(int64_t *g);
+void __cxa_guard_release(int64_t *g);
+void __cxa_guard_abort(int64_t *g);
+
+#ifdef __cplusplus
 }
+#endif
+
+#endif 		// CONSTRUCTOR_H

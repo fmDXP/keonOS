@@ -1,5 +1,5 @@
 /*
- * keonOS - libc/stdlib/itoa.cpp
+ * keonOS - kernel/arch/x86_64/constructor.cpp
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,37 +18,28 @@
  * See the GNU General Public License for more details.
  */
 
-#include <stdlib.h>
+#include <kernel/arch/x86_64/constructor.h>
+#include <stdint.h>
 
-char* itoa(uint64_t value, char* str, int base) 
+extern "C" constructor start_ctors;
+extern "C" constructor end_ctors;
+
+extern "C" void initialize_constructors()
 {
-    char* ptr = str;
-    char* ptr1 = str;
-    char tmp_char;
-    uint64_t tmp_value;
+    for (constructor* i = &start_ctors; i < &end_ctors; i++) 
+        if (*i) (*i)();
+}
 
-    if (value == 0) 
-    {
-        *ptr++ = '0';
-        *ptr = '\0';
-        return str;
-    }
-    
-    while (value != 0) 
-    {
-        tmp_value = value;
-        value /= base;
-        *ptr++ = "0123456789abcdef"[tmp_value % base];
-    }
+extern "C" 
+{
+    int __cxa_guard_acquire(int64_t *g) { return !*(char *)(g); }
+    void __cxa_guard_release(int64_t *g) { *(char *)(g) = 1; }
+    void __cxa_guard_abort(int64_t *g) { (void)g; }
 
-    *ptr-- = '\0';
-    
-    while (ptr1 < ptr) 
+    void* __dso_handle = nullptr;
+    int __cxa_atexit(void (*f)(void *), void *p, void *d) 
     {
-        tmp_char = *ptr;
-        *ptr-- = *ptr1;
-        *ptr1++ = tmp_char;
+        (void)f; (void)p; (void)d;
+        return 0;
     }
-
-    return str;
 }

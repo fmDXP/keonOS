@@ -19,15 +19,15 @@
  */
 
 
+#include <kernel/arch/x86_64/paging.h>
+#include <kernel/arch/x86_64/thread.h>
+
 #include <kernel/constants.h>
 #include <kernel/kernel.h>
 #include <kernel/shell.h>
 
-#include <mm/paging.h>
 #include <mm/heap.h>
 #include <mm/vmm.h>
-
-#include <proc/thread.h>
 
 #include <fs/ramfs.h>
 #include <fs/ramfs_vfs.h>
@@ -212,7 +212,7 @@ static void cmd_meminfo()
     
     printf("\n --- Kernel Heap Information --- \n");
 
-    printf("Heap Start: 0x%x\n", (uint32_t)get_kheap_start());
+    printf("Heap Start: 0x%x\n", get_kheap_start());
     printf("Total Size: %d KB\n", (int)(stats.total_size / 1024));
 
     int used_kb = (int)(stats.used_size / 1024);
@@ -358,22 +358,22 @@ static void cmd_testpaging()
         printf("FAILED - Out of memory\n");
         return;
     }
-    printf("OK (Phys: 0x%x)\n", (uint32_t)frame);
+    printf("OK (Phys: 0x%lx)\n", (uintptr_t)frame);
     
     void* test_vaddr = (void*)0xE0000000;
-    printf(" [2] Mapping virtual page 0x%x... ", (uint32_t)test_vaddr);
-    paging_map_page(test_vaddr, frame, PTE_PRESENT | PTE_RW, true);
+    printf(" [2] Mapping virtual page 0x%lx... ", (uintptr_t)test_vaddr);
+    paging_map_page(test_vaddr, frame, PTE_PRESENT | PTE_RW);
     printf("OK\n");        
     
     printf(" [3] Verification: ");
     void* phys = paging_get_physical_address(test_vaddr);
     if (phys == frame) 
-        printf("MATCH (0x%x == 0x%x)\n", (uint32_t)phys, (uint32_t)frame);
+        printf("MATCH (0x%lx == 0x%lx)\n", (uintptr_t)phys, (uintptr_t)frame);
 
     else
     {
         terminal_setcolor(vga_color_t(VGA_COLOR_RED, VGA_COLOR_BLACK));
-        printf("FAILED (Got 0x%x)\n", (uint32_t)phys);
+        printf("FAILED (Got 0x%lx)\n", (uintptr_t)phys);
         terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
     }
     

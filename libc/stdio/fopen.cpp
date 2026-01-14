@@ -24,7 +24,7 @@
 #include <mm/heap.h>
 
 
-extern "C" FILE* fopen(const char* filename, const char* mode) 
+extern "C" FILE* fopen(const char* filename, [[maybe_unused]] const char* mode)
 {
     VFSNode* node = vfs_open(filename);
     if (!node) return NULL;
@@ -35,7 +35,7 @@ extern "C" FILE* fopen(const char* filename, const char* mode)
         return NULL;
     }
 
-    stream->fd = (int)node;
+    stream->fd = (uintptr_t)node;
     stream->offset = 0;
     stream->size = node->size;
     stream->error = 0;

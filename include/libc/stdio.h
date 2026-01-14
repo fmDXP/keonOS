@@ -38,9 +38,9 @@ extern "C" {
 
 typedef struct
 {
-	int fd;
-	uint32_t offset;
-	uint32_t size;
+	uintptr_t fd;
+	uintptr_t offset;
+	uintptr_t size;
 	int error;
 } FILE;
 

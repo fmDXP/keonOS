@@ -38,11 +38,11 @@ __attribute__((noreturn)) void __stack_chk_fail(void);
 __attribute__((__noreturn__))
 void abort(void);
 
-char* itoa(int value, char* str, int base);
+char* itoa(uint64_t value, char* str, int base);
 char* utoa(unsigned int value, char* str, int base);
 unsigned long strtoul(const char* nptr, char** endptr, int base);
 int atoi(const char* str);
-
+char* ulltoa(unsigned long long value, char* str, int base);
 
 extern int errno;
 

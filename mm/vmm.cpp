@@ -18,10 +18,11 @@
  * See the GNU General Public License for more details.
  */
 
-#include <mm/paging.h>
+#include <kernel/arch/x86_64/paging.h>
+#include <kernel/constants.h>
 #include <mm/vmm.h>
 
-uintptr_t VMM::kernel_dynamic_break = 0xD0000000;
+uintptr_t VMM::kernel_dynamic_break = 0xFFFFFFFF80800000;
 
 void* VMM::allocate(size_t pages, uint32_t flags)
 {
@@ -31,7 +32,7 @@ void* VMM::allocate(size_t pages, uint32_t flags)
 	{
 		void* phys_frame = pfa_alloc_frame();
 		if (!phys_frame) return nullptr;
-		paging_map_page((void*)(kernel_dynamic_break + (i * PAGE_SIZE)), phys_frame, flags, true);
+		paging_map_page((void*)(kernel_dynamic_break + (i * PAGE_SIZE)), phys_frame, (uint64_t)flags);
 	}
 	kernel_dynamic_break += (pages * PAGE_SIZE);
 	return start_addr;
@@ -54,7 +55,7 @@ static size_t vmm_allocated_bytes = 0;
 
 void* VMM::sbrk(size_t increment_bytes)
 {
-	static uintptr_t current_break = 0xD0000000;
+	static uintptr_t current_break = 0xFFFFFFFF80800000;
 	uintptr_t old_break = current_break;
 
 	if (increment_bytes == 0) return (void*)old_break;
@@ -66,7 +67,7 @@ void* VMM::sbrk(size_t increment_bytes)
 	{
 		void* phys_frame = pfa_alloc_frame();
 		if (!phys_frame) return (void*)-1;
-		paging_map_page((void*)current_break, phys_frame, PTE_PRESENT | PTE_RW, true);
+		paging_map_page((void*)current_break, phys_frame, (uint64_t)(PTE_PRESENT | PTE_RW));
 		current_break += PAGE_SIZE;
 	}
 	return (void*)old_break;
@@ -83,7 +84,7 @@ void* VMM::map_physical_region(uintptr_t phys_addr, size_t pages, uint32_t flags
 
     for (size_t i = 0; i < pages; i++)
     {
-        paging_map_page((void*)(kernel_dynamic_break), (void*)(phys_addr + (i * PAGE_SIZE)), flags, false);
+        paging_map_page((void*)(kernel_dynamic_break), (void*)(phys_addr + (i * PAGE_SIZE)), (uint64_t)flags);
         kernel_dynamic_break += PAGE_SIZE;
     }
 

@@ -24,16 +24,16 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <drivers/multiboot.h>
+#include <drivers/multiboot2.h>
 
 #if defined(__linux__)
 #error "You are not using a cross-compiler, keonOS can't compile. Aborting..."
 #endif
 
-#if !defined(__i386__)
-#error "keonOS needs to be compiled with a ix86-elf (cross-)compiler. Aborting..."
+#if !defined(__x86_64__)
+#error "keonOS needs to be compiled with a x86-elf (cross-)compiler. Aborting..."
 #endif
 
-extern "C" void kernel_main(uint32_t magic, multiboot_info_t* info);
+extern "C" void kernel_main(uint64_t magic, uint64_t multiboot_phys_addr);
 
 #endif		// KERNEL_H

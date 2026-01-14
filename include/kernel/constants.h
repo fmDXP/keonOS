@@ -25,11 +25,17 @@
 
 #define OS_NAME				"keonOS"
 #define OS_VERSION_MAJOR	"0"
-#define OS_VERSION_MINOR	"2"
-#define OS_VERSION_PATCH	"a"			// Uses letters
+#define OS_VERSION_MINOR	"3"
+#define OS_VERSION_PATCH	" "			// Uses letters
 
 #define OS_VERSION_STRING 			OS_NAME " v" OS_VERSION_MAJOR "." OS_VERSION_MINOR OS_VERSION_PATCH
 #define OS_VERSION_STRING_NO_NAME 	OS_VERSION_MAJOR "." OS_VERSION_MINOR OS_VERSION_PATCH
+
+
+
+// KERNEL CONSTANTS
+
+#define KERNEL_VIRT_OFFSET 0xFFFFFFFF80000000
 
 
 
@@ -49,37 +55,23 @@
 
 #define VGA_WIDTH		80
 #define VGA_HEIGHT		25
-#define VGA_MEMORY		0xB8000
+#define VGA_MEMORY		(0xB8000 + KERNEL_VIRT_OFFSET)
 
 
 
 // PAGING CONSTANTS
 
-#define PAGE_SIZE 0x1000
-#define PAGE_SIZE_4KB 4096
+#define PAGE_SIZE 4096
 
-#define PTE_PRESENT   0x001  
-#define PTE_RW        0x002  
-#define PTE_USER      0x004  
-#define PTE_PWT       0x008  
-#define PTE_PCD       0x010  
-#define PTE_ACCESSED  0x020  
-#define PTE_DIRTY     0x040  
-#define PTE_PAT       0x080  
-#define PTE_GLOBAL    0x100  
+#define PML4_SIZE 512
+#define PDPT_SIZE 512
+#define PD_SIZE   512
+#define PT_SIZE   512
 
-#define PDE_PRESENT   0x001
-#define PDE_RW        0x002
-#define PDE_USER      0x004
-#define PDE_PWT       0x008
-#define PDE_PCD       0x010
-#define PDE_ACCESSED  0x020
-#define PDE_PAT       0x080
-#define PDE_4MB       0x080  
-
-#define PAGE_DIRECTORY_SIZE 1024
-#define PAGE_TABLE_SIZE 1024
-
+#define PML4_IDX(addr) (((uintptr_t)(addr) >> 39) & 0x1FF)
+#define PDPT_IDX(addr) (((uintptr_t)(addr) >> 30) & 0x1FF)
+#define PD_IDX(addr)   (((uintptr_t)(addr) >> 21) & 0x1FF)
+#define PT_IDX(addr)   (((uintptr_t)(addr) >> 12) & 0x1FF)
 
 
 // IDT CONSTANTS
@@ -128,8 +120,8 @@
 
 // THREAD CONSTANTS
 
-#define THREAD_NOT_FOUND 0xFFFFFFFF
-#define THREAD_AMBIGUOUS 0xFFFFFFFE
+#define THREAD_NOT_FOUND (uint32_t)-1
+#define THREAD_AMBIGUOUS (uint32_t)-2
 
 
 

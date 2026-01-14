@@ -19,8 +19,8 @@
  */
 
 
+#include <kernel/arch/x86_64/thread.h>
 #include <kernel/constants.h>
-#include <proc/thread.h>
 #include <mm/heap.h>
 #include <mm/vmm.h>
 #include <string.h>
@@ -47,7 +47,7 @@ void* kmalloc(size_t size)
 {   
     if (!heap_start) return NULL;
 
-    size = (size + 3) & ~3;
+    size = (size + 15) & ~15;
     spin_lock_irqsave(&heap_lock);
 
     struct heap_block* current = heap_start;
@@ -57,7 +57,7 @@ void* kmalloc(size_t size)
 	{
         if (current->free && current->size >= size) 
 		{   
-            if (current->size > size + sizeof(struct heap_block) + 4) 
+            if (current->size > size + sizeof(struct heap_block) + 16) 
 			{   
                 struct heap_block* new_block = (struct heap_block*)((uint8_t*)current + sizeof(struct heap_block) + size);
                 new_block->size = current->size - size - sizeof(struct heap_block);
@@ -108,26 +108,21 @@ void kfree(void* ptr)
     
     
     if (block->next && block->next->free) 
-	{
+    {
         block->size += sizeof(struct heap_block) + block->next->size;
         block->next = block->next->next;
     }
     
-    struct heap_block* prev = heap_start;
-    while (prev && prev->next != block)
-    {
-        if (prev->next == block)
+    struct heap_block* curr = heap_start;
+    while (curr && curr->next) {
+        if (curr->free && curr->next->free) 
         {
-            if (prev->free)
-            {
-                prev->size += sizeof(struct heap_block) + block->size;
-                prev->next = block->next;
-            }
-            break;
+            curr->size += sizeof(struct heap_block) + curr->next->size;
+            curr->next = curr->next->next;
+            continue; 
         }
-        prev = prev->next;
+        curr = curr->next;
     }
-
     spin_unlock_irqrestore(&heap_lock);
 }
 
@@ -186,4 +181,10 @@ void operator delete(void* ptr, size_t size) noexcept
 {
     (void)size;
     kfree(ptr);
+}
+
+void operator delete[](void* ptr, long unsigned int size) noexcept 
+{
+    (void)size;
+    operator delete[](ptr);
 }

@@ -18,20 +18,20 @@
  * See the GNU General Public License for more details.
  */
 
-#include <kernel/arch/i386/idt.h>
+#include <kernel/arch/x86_64/idt.h>
 #include <drivers/timer.h>
 
 static void play_sound(uint32_t nFrequence) 
 {
-    uint32_t Div;
-    uint8_t tmp;
+    if (nFrequence == 0) return;
 
-    Div = 1193180 / nFrequence;
+    uint32_t Div = 1193180 / nFrequence;
+
     outb(0x43, 0xB6);
     outb(0x42, (uint8_t) (Div) );
     outb(0x42, (uint8_t) (Div >> 8));
 
-    tmp = inb(0x61);
+    uint8_t tmp = inb(0x61);
     if (tmp != (tmp | 3))
         outb(0x61, tmp | 3);
 }

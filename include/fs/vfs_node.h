@@ -47,11 +47,11 @@ public:
     virtual ~VFSNode() {}
 
     virtual uint32_t read(uint32_t offset, uint32_t size, uint8_t* buffer) = 0;
-    virtual uint32_t write(uint32_t offset, uint32_t size, uint8_t* buffer) { return 0; }
+    virtual uint32_t write([[maybe_unused]] uint32_t offset, [[maybe_unused]] uint32_t size, [[maybe_unused]] uint8_t* buffer) { return 0; }
     virtual void open() = 0;
     virtual void close() = 0;
-    virtual vfs_dirent* readdir(uint32_t index) { return nullptr; }
-    virtual VFSNode* finddir(const char* name) { return nullptr; }
+    virtual vfs_dirent* readdir([[maybe_unused]] uint32_t index) { return nullptr; }
+    virtual VFSNode* finddir([[maybe_unused]] const char* name) { return nullptr; }
 };
 
 class RootFS : public VFSNode 

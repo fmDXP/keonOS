@@ -18,7 +18,7 @@
  * See the GNU General Public License for more details.
  */
 
-#include <kernel/arch/i386/idt.h>
+#include <kernel/arch/x86_64/idt.h>
 #include <drivers/vga.h>
 #include <string.h>
 

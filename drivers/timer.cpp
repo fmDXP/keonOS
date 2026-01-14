@@ -19,12 +19,12 @@
  */
 
 
-#include <kernel/arch/i386/idt.h>
+#include <kernel/arch/x86_64/thread.h>
+#include <kernel/arch/x86_64/idt.h>
 #include <drivers/timer.h>
-#include <proc/thread.h>
 
-static uint32_t timer_ticks = 0;
-static uint32_t timer_hz = 0;
+static volatile uint32_t timer_ticks = 0;
+static volatile uint32_t timer_hz = 0;
 
 bool timer_init(uint32_t frequency) 
 {
@@ -84,14 +84,23 @@ void timer_sleep(uint32_t milliseconds)
     
     if (ticks_to_wait == 0 && milliseconds > 0) ticks_to_wait = 1;
     if (ticks_to_wait == 0) return;
-    
+
     thread_t* current = thread_get_current();
-    if (!current) return;
+    
+    if (!current) 
+    {
+        uint32_t start = timer_ticks;
+        while ((timer_ticks - start) < ticks_to_wait)
+            asm volatile("pause");
+    
+        return;
+    }
 
     asm volatile("cli");
+
     current->sleep_ticks = ticks_to_wait;
     current->state = THREAD_SLEEPING;
-    asm volatile("sti");
 
-    yield();
+    asm volatile("sti");
+    yield(); 
 }

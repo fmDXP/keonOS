@@ -74,17 +74,17 @@ void panic(KernelError error, const char* message, uint32_t error_code)
 
     // 2. CPU Snapshot: Capture General Purpose and Control Registers
     // These reflect the CPU state at the time the panic was called
-    uint32_t eax, ebx, ecx, edx, esp, ebp, esi, edi, cr0, cr2, cr3;
-    asm volatile("mov %%eax, %0" : "=r"(eax));
-    asm volatile("mov %%ebx, %0" : "=r"(ebx));
-    asm volatile("mov %%ecx, %0" : "=r"(ecx));
-    asm volatile("mov %%edx, %0" : "=r"(edx));
-    asm volatile("mov %%esi, %0" : "=r"(esi));
-    asm volatile("mov %%edi, %0" : "=r"(edi));
-    asm volatile("mov %%ebp, %0" : "=r"(ebp));
-    asm volatile("mov %%esp, %0" : "=r"(esp));
+    uint64_t rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi, cr0, cr2, cr3;
+    
+    asm volatile("mov %%rax, %0" : "=r"(rax));
+    asm volatile("mov %%rbx, %0" : "=r"(rbx));
+    asm volatile("mov %%rcx, %0" : "=r"(rcx));
+    asm volatile("mov %%rdx, %0" : "=r"(rdx));
+    asm volatile("mov %%rsi, %0" : "=r"(rsi));
+    asm volatile("mov %%rdi, %0" : "=r"(rdi));
+    asm volatile("mov %%rbp, %0" : "=r"(rbp));
+    asm volatile("mov %%rsp, %0" : "=r"(rsp));
 
-    // Paging Control Registers (CR2 contains the faulting address if a Page Fault occurred)
     asm volatile("mov %%cr0, %0" : "=r"(cr0));
     asm volatile("mov %%cr2, %0" : "=r"(cr2));
     asm volatile("mov %%cr3, %0" : "=r"(cr3));
@@ -92,24 +92,27 @@ void panic(KernelError error, const char* message, uint32_t error_code)
 
     printf("\n");
     terminal_setcolor(vga_color_t(VGA_COLOR_YELLOW, VGA_COLOR_RED));
-    printf("Registers:\n");
+    printf("Registers (x64):\n");
     terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_RED));
-    printf("EAX: %08x EBX: %08x ECX: %08x EDX: %08x\n", eax, ebx, ecx, edx);
-    printf("ESI: %08x EDI: %08x EBP: %08x ESP: %08x\n", esi, edi, ebp, esp); 
-    printf("CR0: %08x  CR2: %08x  CR3: %08x\n", cr0, cr2, cr3);
+
+    printf("RAX: %16llx RBX: %16llx\n", rax, rbx);
+    printf("RCX: %16llx RDX: %16llx\n", rcx, rdx);
+    printf("RSI: %16llx RDI: %16llx\n", rsi, rdi);
+    printf("RBP: %16llx RSP: %16llx\n", rbp, rsp); 
+    printf("CR0: %16llx CR2: %16llx CR3: %16llx\n", cr0, cr2, cr3);
 
 
     // 3. Memory Dump: Show a hex/ASCII preview of the stack
     // This allows the developer to see local variables and return addresses
-    printf("\n\n\n");
+    printf("\n\n");
     terminal_setcolor(vga_color_t(VGA_COLOR_YELLOW, VGA_COLOR_RED));
-    printf("Memory Dump (Stack Trace):\n");
+    printf("Stack Trace Dump:\n");
     terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_RED));
 
-    uint8_t* ptr = (uint8_t*)esp;
+    uint8_t* ptr = (uint8_t*)rsp;
     for (int i = 0; i < 64; i += 16) 
     {
-        printf("0x%x: ", (uint32_t)(ptr + i));
+        printf("0x%16llx: ", (uintptr_t)(ptr + i));
 
         for (int j = 0; j < 16; j++) 
         {
