@@ -45,6 +45,44 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#include <sys/syscall.h>
+#include <sys/errno.h>
+
+static bool is_user_mode() 
+{
+    uint16_t cs;
+    asm volatile ("mov %%cs, %0" : "=r"(cs));
+    return (cs & 0x3) != 0;
+}
+
+static void shell_setcolor(vga_color_t color)
+{
+    if (is_user_mode()) 
+    {
+        syscall(SYS_VGA, 1, color.fg, color.bg, 0, 0, 0); // 1 = set color
+    }
+    else 
+    {
+#if defined(__is_libk)
+        terminal_setcolor(color);
+#endif
+    }
+}
+
+static void shell_clear()
+{
+    if (is_user_mode()) 
+    {
+        syscall(SYS_VGA, 0, 0, 0, 0, 0, 0); // 0 = clear
+    }
+    else 
+    {
+#if defined(__is_libk)
+        terminal_clear();
+#endif
+    }
+}
+
 /*
  * keonOS Interactive Shell
  * This module handles user input, command parsing, and system interaction. Kernel Only, tho.
@@ -83,14 +121,14 @@ void shell_init()
 // Displays the shell prompt with branding
 static void shell_prompt()
 {
-    terminal_putchar('\n');
-	terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+    putchar('\n');
+	shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
 	printf("root@keonOS");
-    terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
     printf(":");
-    terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
     printf("%s", current_working_directory);
-	terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+	shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 	printf("$ ");
 }
 
@@ -109,9 +147,9 @@ static void cmd_help(const char* args)
     
     if (is_dev) 
     {
-        terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
+        shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
         printf("\n--- Developer & Debugging Commands ---\n");
-        terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
         
         printf("  testheap   - Stress test the kernel heap allocator\n");
         printf("  testpaging - Verify virtual memory mapping/unmapping\n");
@@ -122,9 +160,9 @@ static void cmd_help(const char* args)
     } 
     else 
     {
-        terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+        shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
         printf("\n--- keonOS Available Commands ---\n");
-        terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 
         printf("  help       - Show this help message (use --dev for more)\n");
         printf("  info       - Show OS version and system branding\n");
@@ -169,7 +207,7 @@ static void resolve_path(char* out, const char* arg)
  */
 static void cmd_clear()
 {
-	terminal_clear();
+	shell_clear();
 }
 
 /*
@@ -192,6 +230,7 @@ static void cmd_echo(const char* args)
     {
         redirect = true;
         size_t msg_len = gt - args;
+        if (msg_len > 255) msg_len = 255;
         strncpy(message, args, msg_len);
         message[msg_len] = '\0';
         
@@ -199,25 +238,55 @@ static void cmd_echo(const char* args)
         while(end > message && isspace(*end)) *end-- = '\0';
 
         const char* file_part = gt + 1;
-        while(isspace(*file_part)) file_part++;
-        strcpy(filename, file_part);
-    } 
-    else strcpy(message, args);
+        while(*file_part && isspace(*file_part)) file_part++;
+        strncpy(filename, file_part, 127);
+        filename[127] = '\0';
+    }
+    else 
+    {
+        strncpy(message, args, 255);
+        message[255] = '\0';
+    }
+
     if (redirect) 
     {
         char full_path[512];
         resolve_path(full_path, filename);
+
+#if defined(__is_libk)
+        if (is_user_mode()) 
+        {
+            int fd = syscall(SYS_OPEN, (uint64_t)full_path, 1, 0, 0, 0, 0); // O_CREAT=1
+            if (fd >= 0) 
+            {
+                syscall(SYS_WRITE, (uint64_t)fd, (uint64_t)message, strlen(message), 0, 0, 0);
+                syscall(SYS_WRITE, (uint64_t)fd, (uint64_t)"\n", 1, 0, 0, 0);
+                syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+            }
+            else printf("echo: cannot write to %s\n", filename);
+            return;
+        }
 
         VFSNode* n = vfs_open(full_path);
         if (!n) n = vfs_create(full_path, 0);
 
         if (n) 
         {
-            vfs_write(n, 0, strlen(message), (uint8_t*)message);
+            vfs_write(n, n->size, strlen(message), (uint8_t*)message);
+            vfs_write(n, n->size, 1, (uint8_t*)"\n");
             vfs_close(n);
         } 
         else printf("echo: error while creating file %s\n", filename);
-        
+#else
+        int fd = syscall(SYS_OPEN, (uint64_t)full_path, 1, 0, 0, 0, 0); // O_CREAT=1
+        if (fd >= 0) 
+        {
+            syscall(SYS_WRITE, (uint64_t)fd, (uint64_t)message, strlen(message), 0, 0, 0);
+            syscall(SYS_WRITE, (uint64_t)fd, (uint64_t)"\n", 1, 0, 0, 0);
+            syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+        }
+        else printf("echo: cannot write to %s\n", filename);
+#endif
     }
     else printf("%s\n", message);
 }
@@ -228,9 +297,9 @@ static void cmd_echo(const char* args)
  */
 static void cmd_info()
 {
-    terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
     printf("\n%s\n", OS_VERSION_STRING);
-    terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
     printf("A x86 operating system written in C++ and Assembly\n");
     printf("Memory: Paging enabled, Kernel Heap active\n");
     printf("Bootloader: GRUB\n");
@@ -275,9 +344,9 @@ static void cmd_testheap()
     kfree(ptr3);
     kfree(ptr4);
     
-    terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
     printf("\nHeap test completed!");
-    terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 }
 
 
@@ -313,30 +382,24 @@ static void cmd_meminfo()
 static void cmd_reboot() 
 {
     printf("Rebooting system...");
-    asm volatile("cli");
-    
-    asm volatile(
-        "movb $0xFE, %%al\n\t"
-        "outb %%al, $0x64"
-        : : : "al", "memory"
-    );
-    
-    for (volatile int i = 0; i < 1000000; i++);
-    
-    asm volatile(
-        "movb $0x06, %%al\n\t"
-        "outb %%al, $0xCF9"
-        : : : "al", "memory"
-    );
-    
-    struct {
-        uint16_t limit;
-        uint32_t base;
-    } invalid_idt = {0, 0};
-    
-    asm volatile("lidt %0" : : "m" (invalid_idt));
-    asm volatile("int $0x00");
-    
+    if (is_user_mode()) 
+    {
+        syscall(SYS_REBOOT, 0, 0, 0, 0, 0, 0);
+    }
+    else 
+    {
+#if defined(__is_libk)
+        asm volatile("cli");
+        outb(0x64, 0xFE);
+        for (volatile int i = 0; i < 1000000; i++);
+        outb(0xCF9, 0x06);
+        struct { uint16_t limit; uint32_t base; } invalid_idt = {0, 0};
+        asm volatile("lidt %0" : : "m" (invalid_idt));
+        asm volatile("int $0x00");
+#else
+        syscall(SYS_REBOOT, 0, 0, 0, 0, 0, 0);
+#endif
+    }
     printf("Reboot failed! System halted.");
     while (1) asm volatile("hlt");
 }
@@ -347,8 +410,15 @@ static void cmd_reboot()
 static void cmd_halt() 
 {
     printf("Halting system...\n");
-    printf("System halted. Press Ctrl+Alt+Del to restart.");
-    while (1) asm volatile("hlt");
+    if (is_user_mode()) 
+    {
+        syscall(SYS_EXIT, 0, 0, 0, 0, 0, 0);
+    }
+    else 
+    {
+        printf("System halted. Press Ctrl+Alt+Del to restart.");
+        while (1) asm volatile("hlt");
+    }
 }
 
 /**
@@ -363,40 +433,26 @@ static void cmd_pkill(const char* args)
         return;
     }
 
-    uint32_t id;
+    uint32_t id = (uint32_t)atoi(args);
 
-    if (args[0] >= '0' && args[0] <= '9') 
-        id = (uint32_t)atoi(args);
+    if (is_user_mode()) 
+    {
+        if (syscall(SYS_KILL, (uint64_t)id, 0, 0, 0, 0, 0) == 0) printf("Thread %d terminated.\n", id);
+        else printf("Error: Could not kill thread %d.\n", id);
+        return;
+    }
 
-    else 
+#if defined(__is_libk)
+    if (args[0] < '0' || args[0] > '9') 
     {
         id = thread_get_id_by_name(args);
-        if (id == THREAD_NOT_FOUND) 
-        {
-            terminal_setcolor(vga_color_t(VGA_COLOR_RED, VGA_COLOR_BLACK));
-            printf("Error: No thread named '%s' found.\n", args);
-            terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-            return;
-        }
-
-        if (id == THREAD_AMBIGUOUS) 
-        {
-            terminal_setcolor(vga_color_t(VGA_COLOR_RED, VGA_COLOR_BLACK));
-            printf("Error: Multiple threads named '%s' found.\n", args);
-            terminal_setcolor(vga_color_t(VGA_COLOR_YELLOW, VGA_COLOR_BLACK));
-            printf("Please use pkill <ID> instead. (Check 'ps' for IDs)\n");
-            terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-            return;
-        }
+        if (id == THREAD_NOT_FOUND) { printf("Error: No thread named '%s' found.\n", args); return; }
+        if (id == THREAD_AMBIGUOUS) { printf("Error: Multiple threads named '%s' found.\n", args); return; }
     }
    
-    if (thread_kill(id)) printf("Thread '%s' (ID: %d) terminated.\n", args, id);
-    else 
-    {
-        terminal_setcolor(vga_color_t(VGA_COLOR_RED, VGA_COLOR_BLACK));
-        printf("Error: Could not kill thread %d. (Is it a system thread?)\n", id);
-        terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
-    }
+    if (thread_kill(id)) printf("Thread %d terminated.\n", id);
+    else printf("Error: Could not kill thread %d.\n", id);
+#endif
 }
 
 /**
@@ -451,9 +507,9 @@ static void cmd_testpaging()
 
     else
     {
-        terminal_setcolor(vga_color_t(VGA_COLOR_RED, VGA_COLOR_BLACK));
+        shell_setcolor(vga_color_t(VGA_COLOR_RED, VGA_COLOR_BLACK));
         printf("FAILED (Got 0x%lx)\n", (uintptr_t)phys);
-        terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
     }
     
     printf(" [4] Unmapping virtual page... ");
@@ -464,9 +520,9 @@ static void cmd_testpaging()
     pfa_free_frame(frame);
     printf("OK\n");
     
-    terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
     printf("\n[SUCCESS] Paging test completed!\n");
-    terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 }
 
 /**
@@ -517,8 +573,31 @@ static void cmd_dump(const char* args)
  */
 static void cmd_ls(const char* args) 
 {
+#if defined(__is_libk)
     VFSNode* dir = nullptr;
     char path[512];
+
+    if (is_user_mode())
+    {
+        if (!args || args[0] == '\0') strcpy(path, current_working_directory);
+        else resolve_path(path, args);
+
+        int fd = (int)syscall(SYS_OPEN, (uintptr_t)path, 0, 0, 0, 0, 0);
+        if (fd < 0) { printf("ls: cannot access '%s'\n", args); return; }
+
+        struct vfs_dirent {
+            char name[128];
+            uint32_t inode;
+            uint32_t type;
+        } de;
+
+        int i = 0;
+        while (syscall(SYS_READDIR, (uint64_t)fd, (uint64_t)i++, (uint64_t)&de, 0, 0, 0) > 0)
+            printf("%s  ", de.name);
+        printf("\n");
+        syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+        return;
+    }
 
     if (!args || args[0] == '\0') 
     { 
@@ -546,6 +625,26 @@ static void cmd_ls(const char* args)
         if (dir != cwd_node && dir != vfs_root) vfs_close(dir);
     } 
     else printf("ls: cannot access '%s': No such file or directory\n", args);
+#else
+    char path[512];
+    if (!args || args[0] == '\0') strcpy(path, current_working_directory);
+    else resolve_path(path, args);
+
+    int fd = (int)syscall(SYS_OPEN, (uintptr_t)path, 0, 0, 0, 0, 0);
+    if (fd < 0) { printf("ls: cannot access '%s'\n", args); return; }
+
+    struct vfs_dirent {
+        char name[128];
+        uint32_t inode;
+        uint32_t type;
+    } de;
+
+    int i = 0;
+    while (syscall(SYS_READDIR, (uint64_t)fd, (uint64_t)i++, (uint64_t)&de, 0, 0, 0) > 0)
+        printf("%s  ", de.name);
+    printf("\n");
+    syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+#endif
 }
 
 /**
@@ -560,14 +659,25 @@ static void cmd_cat(const char* args)
         return;
     }
 
-    if (args[0] == '/') strncpy(path, args, 511);
-    else
+    resolve_path(path, args);
+
+#if defined(__is_libk)
+    if (is_user_mode()) 
     {
-        strncpy(path, current_working_directory, 511);
-        
-        int len = strlen(path);
-        if (len > 0 && path[len-1] != '/') strcat(path, "/");
-        strcat(path, args);
+        int fd = (int)syscall(SYS_OPEN, (uintptr_t)path, 0, 0, 0, 0, 0);
+        if (fd >= 0) 
+        {
+            uint8_t buffer[512];
+            int bytes_read;
+            while ((bytes_read = (int)syscall(SYS_READ, (uint64_t)fd, (uintptr_t)buffer, 512, 0, 0, 0)) > 0) 
+            {
+                for (int i = 0; i < bytes_read; i++) putchar(buffer[i]);
+            }
+            printf("\n");
+            syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+        }
+        else printf("cat: %s: No such file or directory\n", path);
+        return;
     }
     
     VFSNode* file = vfs_open(path);
@@ -591,6 +701,21 @@ static void cmd_cat(const char* args)
         vfs_close(file);
     }
     else printf("cat: %s: No such file or directory\n", path);
+#else
+    int fd = (int)syscall(SYS_OPEN, (uintptr_t)path, 0, 0, 0, 0, 0);
+    if (fd >= 0) 
+    {
+        uint8_t buffer[512];
+        int bytes_read;
+        while ((bytes_read = (int)syscall(SYS_READ, (uint64_t)fd, (uintptr_t)buffer, 512, 0, 0, 0)) > 0) 
+        {
+            for (int i = 0; i < bytes_read; i++) putchar(buffer[i]);
+        }
+        printf("\n");
+        syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+    }
+    else printf("cat: %s: No such file or directory\n", path);
+#endif
 }
 
 /**
@@ -646,47 +771,83 @@ static void shell_tab_completion()
         path_temp[255] = '\0';
 
         char* last_slash = strrchr(path_temp, '/');
-        VFSNode* search_dir = (file_part[0] == '/') ? vfs_root : (cwd_node ? cwd_node : vfs_root);
         const char* search_term = file_part;
-        bool should_close_dir = false;
 
+        char search_dir_path[256];
         if (last_slash) 
         {
             search_term = strrchr(file_part, '/') + 1;
-            
-            if (last_slash == path_temp) search_dir = vfs_root;
+            if (last_slash == path_temp) strcpy(search_dir_path, "/");
             else 
             {
                 *last_slash = '\0';
-                VFSNode* target = vfs_open(path_temp);
-                if (target && target->type == VFS_DIRECTORY) 
-                {
-                    search_dir = target;
-                    should_close_dir = true;
-                }
-                else 
-                {
-                    if (target) vfs_close(target);
-                    return;
-                }
+                strcpy(search_dir_path, path_temp);
             }
         }
+        else strcpy(search_dir_path, current_working_directory);
 
         int part_len = strlen(search_term);
         char matched_names[64][128];
         uint8_t file_types[64];
         int f_matches_found = 0;
-        uint32_t i = 0;
-        vfs_dirent* de;
-        
-        while ((de = vfs_readdir(search_dir, i++)) && f_matches_found < 64) 
+
+        if (is_user_mode())
         {
-            if (strncmp(search_term, de->name, part_len) == 0) 
+            int fd = (int)syscall(SYS_OPEN, (uint64_t)search_dir_path, 0, 0, 0, 0, 0);
+            if (fd >= 0)
             {
-                strcpy(matched_names[f_matches_found], de->name);
-                file_types[f_matches_found] = de->type;
-                f_matches_found++;
+                struct vfs_dirent {
+                    char name[128];
+                    uint32_t inode;
+                    uint32_t type;
+                } de;
+
+                int i = 0;
+                while (syscall(SYS_READDIR, (uint64_t)fd, (uint64_t)i++, (uint64_t)&de, 0, 0, 0) > 0 && f_matches_found < 64)
+                {
+                    if (strncmp(search_term, de.name, part_len) == 0) 
+                    {
+                        strcpy(matched_names[f_matches_found], de.name);
+                        file_types[f_matches_found] = de.type;
+                        f_matches_found++;
+                    }
+                }
+                syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
             }
+        }
+        else 
+        {
+#if defined(__is_libk)
+            VFSNode* search_dir = (file_part[0] == '/') ? vfs_root : (cwd_node ? cwd_node : vfs_root);
+            bool should_close_dir = false;
+
+            if (last_slash) 
+            {
+                if (last_slash != path_temp) 
+                {
+                    VFSNode* target = vfs_open(path_temp);
+                    if (target && target->type == VFS_DIRECTORY) 
+                    {
+                        search_dir = target;
+                        should_close_dir = true;
+                    }
+                    else { if (target) vfs_close(target); return; }
+                }
+            }
+
+            uint32_t i = 0;
+            vfs_dirent* de;
+            while ((de = vfs_readdir(search_dir, i++)) && f_matches_found < 64) 
+            {
+                if (strncmp(search_term, de->name, part_len) == 0) 
+                {
+                    strcpy(matched_names[f_matches_found], de->name);
+                    file_types[f_matches_found] = de->type;
+                    f_matches_found++;
+                }
+            }
+            if (should_close_dir && search_dir != vfs_root && search_dir != cwd_node) vfs_close(search_dir);
+#endif
         }
 
         if (f_matches_found == 1) 
@@ -704,7 +865,7 @@ static void shell_tab_completion()
                 printf("%c", *completion++);
             }
 
-            if (file_types[0] == VFS_DIRECTORY) 
+            if (file_types[0] == 2) // VFS_DIRECTORY=2
             {
                 input_buffer[buffer_pos++] = '/';
                 printf("/");
@@ -720,14 +881,13 @@ static void shell_tab_completion()
             printf("\n");
             for (int j = 0; j < f_matches_found; j++) 
             {
-                if (file_types[j] == VFS_DIRECTORY) terminal_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
-                printf("%s%s  ", matched_names[j], (file_types[j] == VFS_DIRECTORY ? "/" : ""));
-                terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+                if (file_types[j] == 2) shell_setcolor(vga_color_t(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+                printf("%s%s  ", matched_names[j], (file_types[j] == 2 ? "/" : ""));
+                shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
             }
             shell_prompt();
             printf("%s", input_buffer);
         }
-        if (should_close_dir && search_dir != vfs_root && search_dir != cwd_node) vfs_close(search_dir);
     }
 }
 
@@ -736,6 +896,15 @@ static void shell_tab_completion()
  */
 static void cmd_uptime() 
 {
+    if (is_user_mode()) 
+    {
+        uint32_t ticks = (uint32_t)syscall(SYS_UPTIME, 0, 0, 0, 0, 0, 0);
+        uint32_t seconds = ticks / 100;
+        printf("System uptime: %d hours, %d minutes, %d seconds (%d ticks)\n", 
+                seconds / 3600, (seconds / 60) % 60, seconds % 60, ticks);
+        return;
+    }
+#if defined(__is_libk)
     uint32_t ticks = timer_get_ticks();
     uint32_t seconds = ticks / 100;
     uint32_t minutes = seconds / 60;
@@ -743,6 +912,7 @@ static void cmd_uptime()
 
     printf("System uptime: %d hours, %d minutes, %d seconds (%d ticks)\n", 
             hours, minutes % 60, seconds % 60, ticks);
+#endif
 }
 
 /**
@@ -750,7 +920,14 @@ static void cmd_uptime()
  */
 static void cmd_ps() 
 { 
+    if (is_user_mode()) 
+    {
+        syscall(SYS_PS, 0, 0, 0, 0, 0, 0);
+        return;
+    }
+#if defined(__is_libk)
     thread_print_list(); 
+#endif
 }
 
 
@@ -761,14 +938,41 @@ static void cmd_cd(const char* args)
 {
     if (!args || args[0] == '\0' || strcmp(args, "~") == 0) 
     {
-        if (cwd_node && cwd_node != vfs_root) vfs_close(cwd_node);
-        cwd_node = vfs_root;
         strcpy(current_working_directory, "/");
+#if defined(__is_libk)
+        if (!is_user_mode())
+        {
+            if (cwd_node && cwd_node != vfs_root) vfs_close(cwd_node);
+            cwd_node = vfs_root;
+        }
+#endif
         return;
     }
 
     char path[512];
     resolve_path(path, args);
+
+#if defined(__is_libk)
+    if (is_user_mode())
+    {
+        int fd = (int)syscall(SYS_OPEN, (uintptr_t)path, 0, 0, 0, 0, 0);
+        if (fd >= 0)
+        {
+            syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+            if (strcmp(args, "..") == 0) 
+            {
+                if (strcmp(current_working_directory, "/") != 0) 
+                {
+                    char* last = strrchr(current_working_directory, '/');
+                    if (last == current_working_directory) strcpy(current_working_directory, "/");
+                    else if (last) *last = '\0';
+                }
+            } 
+            else if (strcmp(args, ".") != 0) strncpy(current_working_directory, path, 255);
+        }
+        else printf("cd: %s: No such file or directory\n", args);
+        return;
+    }
 
     VFSNode* new_dir = vfs_open(path);
     if (new_dir) 
@@ -797,6 +1001,7 @@ static void cmd_cd(const char* args)
         }
     } 
     else printf("cd: %s: No such file or directory\n", args);
+#endif
 }
 
 /**
@@ -813,7 +1018,14 @@ static void cmd_mkdir(const char* args)
     char full_path[512];
     resolve_path(full_path, args);
 
+#if defined(__is_libk)
+    if (is_user_mode())
+    {
+        if (syscall(SYS_MKDIR, (uintptr_t)full_path, 0755, 0, 0, 0, 0) != 0) printf("mkdir: cannot create directory '%s'\n", args);
+        return;
+    }
     if (vfs_mkdir(full_path, 0755) != 0) printf("mkdir: cannot create directory '%s'\n", args);
+#endif
 }
 
 /**
@@ -830,9 +1042,18 @@ static void cmd_touch(const char* args)
     char full_path[512];
     resolve_path(full_path, args);
 
+#if defined(__is_libk)
+    if (is_user_mode())
+    {
+        int fd = (int)syscall(SYS_OPEN, (uintptr_t)full_path, 1, 0, 0, 0, 0); // 1 = O_CREAT
+        if (fd >= 0) syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
+        else printf("touch: cannot create '%s'\n", args);
+        return;
+    }
     VFSNode* n = vfs_create(full_path, 0); 
     if (n) vfs_close(n);
     else printf("touch: cannot create '%s'\n", args);
+#endif
 }
 
 /**
@@ -848,7 +1069,14 @@ static void cmd_rm(const char* args)
 
     char full_path[512];
     resolve_path(full_path, args);
+#if defined(__is_libk)
+    if (is_user_mode())
+    {
+        if (syscall(SYS_UNLINK, (uintptr_t)full_path, 0, 0, 0, 0, 0) != 0) printf("rm: cannot remove '%s': No such file or directory\n", args);
+        return;
+    }
     if (!vfs_unlink(full_path)) printf("rm: cannot remove '%s': No such file or directory\n", args);
+#endif
 }
 
 /**
@@ -885,14 +1113,22 @@ void shell_execute(const char* command)
     else if (strcmp(cmd, "clear") == 0) 		cmd_clear();
     else if (strcmp(cmd, "echo") == 0) 			cmd_echo(clean_args);
 	else if (strcmp(cmd, "info") == 0) 			cmd_info();
-    else if (strcmp(cmd, "testheap") == 0) 		cmd_testheap();
-    else if (strcmp(cmd, "meminfo") == 0) 		cmd_meminfo();
+
+#if defined(__is_libk)
+    else if (!is_user_mode() && strcmp(cmd, "testheap") == 0) 	cmd_testheap();
+    else if (!is_user_mode() && strcmp(cmd, "meminfo") == 0) 	cmd_meminfo();
+#endif
+
     else if (strcmp(cmd, "reboot") == 0) 		cmd_reboot();
     else if (strcmp(cmd, "halt") == 0) 			cmd_halt();
-    else if (strcmp(cmd, "paginginfo") == 0) 	cmd_paginginfo();
-	else if (strcmp(cmd, "testpaging") == 0) 	cmd_testpaging();
-    else if (strcmp(cmd, "memstat") == 0)       cmd_memstat();
-    else if (strcmp(cmd, "dump") == 0)          cmd_dump(clean_args);
+
+#if defined(__is_libk)
+    else if (!is_user_mode() && strcmp(cmd, "paginginfo") == 0) 	cmd_paginginfo();
+	else if (!is_user_mode() && strcmp(cmd, "testpaging") == 0) 	cmd_testpaging();
+    else if (!is_user_mode() && strcmp(cmd, "memstat") == 0)     cmd_memstat();
+    else if (!is_user_mode() && strcmp(cmd, "dump") == 0)        cmd_dump(clean_args);
+#endif
+
     else if (strcmp(cmd, "uptime") == 0)        cmd_uptime();
     else if (strcmp(cmd, "ps") == 0)            cmd_ps();
     else if (strcmp(cmd, "pkill") == 0)         cmd_pkill(clean_args);
@@ -904,7 +1140,7 @@ void shell_execute(const char* command)
     else if (strcmp(cmd, "rm") == 0)            cmd_rm(clean_args); 
 
 	else printf("Unknown command: %s\nType 'help' for available commands", command);
-    terminal_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    shell_setcolor(vga_color_t(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
 }
 
 
@@ -918,10 +1154,10 @@ void shell_run()
     
     while (true) 
 	{
-        char c = keyboard_getchar();
+        char c = getchar();
         if (c == 0) continue;
 
-        if (c == '\n') 
+        if (c == '\n' || c == '\r') 
         {
             printf("\n");
             input_buffer[buffer_pos] = '\0';
@@ -949,10 +1185,6 @@ void shell_run()
             {
                 buffer_pos--;
                 input_buffer[buffer_pos] = '\0';
-                
-                serial_putc('\b');
-                serial_putc(' ');
-                serial_putc('\b');
                 
                 putchar('\b');
                 putchar(' ');

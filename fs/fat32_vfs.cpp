@@ -45,9 +45,6 @@ void FAT32Manager::init(uint32_t lba)
     }
 
     if (label[0] == '\0') strcpy(label, "NO NAME");
-
-    printf("[FAT32] Volume Label: %s\n", label);
-    printf("[FAT32] Root Cluster: %u\n", bpb.root_cluster);
 }
 
 uint32_t FAT32Manager::cluster_to_lba(uint32_t cluster) 
@@ -389,7 +386,7 @@ vfs_dirent* FAT32_Directory::readdir(uint32_t index)
 }
 
 
-int FAT32_Directory::mkdir(const char* name, uint32_t mode) 
+int FAT32_Directory::mkdir(const char* name, [[maybe_unused]] uint32_t mode) 
 {
     uint32_t new_cluster = fat32_inst.allocate_cluster();
     if (!new_cluster) return -1;

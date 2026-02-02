@@ -20,6 +20,7 @@
 
 
 #include <kernel/panic.h>
+#include <kernel/arch/x86_64/idt.h>
 #include <drivers/vga.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,7 +30,7 @@
  * Displays system state, CPU registers, and a memory dump before halting.
 */
 
-void panic(KernelError error, const char* message, uint32_t error_code)
+void panic(KernelError error, const char* message, uint32_t error_code, struct registers_t* regs)
 {
     // 1. Safety first: Disable interrupts to prevent context switching during panic
     asm volatile("cli");   
@@ -72,18 +73,27 @@ void panic(KernelError error, const char* message, uint32_t error_code)
         printf("%s", buffer);
     }
 
-    // 2. CPU Snapshot: Capture General Purpose and Control Registers
-    // These reflect the CPU state at the time the panic was called
-    uint64_t rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi, cr0, cr2, cr3;
+    // 2. CPU Snapshot: Use provided registers or capture current ones
+    uint64_t rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi;
+    uint64_t cr0, cr2, cr3, rip = 0, cs = 0, rflags = 0;
     
-    asm volatile("mov %%rax, %0" : "=r"(rax));
-    asm volatile("mov %%rbx, %0" : "=r"(rbx));
-    asm volatile("mov %%rcx, %0" : "=r"(rcx));
-    asm volatile("mov %%rdx, %0" : "=r"(rdx));
-    asm volatile("mov %%rsi, %0" : "=r"(rsi));
-    asm volatile("mov %%rdi, %0" : "=r"(rdi));
-    asm volatile("mov %%rbp, %0" : "=r"(rbp));
-    asm volatile("mov %%rsp, %0" : "=r"(rsp));
+    if (regs)
+    {
+        rax = regs->rax; rbx = regs->rbx; rcx = regs->rcx; rdx = regs->rdx;
+        rsi = regs->rsi; rdi = regs->rdi; rbp = regs->rbp; rsp = regs->rsp;
+        rip = regs->rip; cs = regs->cs; rflags = regs->rflags;
+    }
+    else
+    {
+        asm volatile("mov %%rax, %0" : "=r"(rax));
+        asm volatile("mov %%rbx, %0" : "=r"(rbx));
+        asm volatile("mov %%rcx, %0" : "=r"(rcx));
+        asm volatile("mov %%rdx, %0" : "=r"(rdx));
+        asm volatile("mov %%rsi, %0" : "=r"(rsi));
+        asm volatile("mov %%rdi, %0" : "=r"(rdi));
+        asm volatile("mov %%rbp, %0" : "=r"(rbp));
+        asm volatile("mov %%rsp, %0" : "=r"(rsp));
+    }
 
     asm volatile("mov %%cr0, %0" : "=r"(cr0));
     asm volatile("mov %%cr2, %0" : "=r"(cr2));
@@ -99,6 +109,7 @@ void panic(KernelError error, const char* message, uint32_t error_code)
     printf("RCX: %16llx RDX: %16llx\n", rcx, rdx);
     printf("RSI: %16llx RDI: %16llx\n", rsi, rdi);
     printf("RBP: %16llx RSP: %16llx\n", rbp, rsp); 
+    if (regs) printf("RIP: %16llx CS:  %16llx RFLG: %16llx\n", rip, cs, rflags);
     printf("CR0: %16llx CR2: %16llx CR3: %16llx\n", cr0, cr2, cr3);
 
 

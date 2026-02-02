@@ -25,7 +25,7 @@
 
 #define OS_NAME				"keonOS"
 #define OS_VERSION_MAJOR	"0"
-#define OS_VERSION_MINOR	"4"
+#define OS_VERSION_MINOR	"5"
 #define OS_VERSION_PATCH	" "			// Uses letters
 
 #define OS_VERSION_STRING 			OS_NAME " v" OS_VERSION_MAJOR "." OS_VERSION_MINOR OS_VERSION_PATCH

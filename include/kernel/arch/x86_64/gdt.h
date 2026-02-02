@@ -35,7 +35,7 @@ extern "C"
         uint8_t base_high;
     } __attribute__((packed));
 
-    struct gdt_tss_entry
+    struct gdt_tss_descriptor
     {
         uint16_t limit_low;
         uint16_t base_low;
@@ -47,6 +47,19 @@ extern "C"
         uint32_t reserved;
     } __attribute__((packed));
 
+    struct tss_entry 
+    {
+        uint32_t reserved0;
+        uint64_t rsp0;      
+        uint64_t rsp1;
+        uint64_t rsp2;
+        uint64_t reserved1;
+        uint64_t ist[7];
+        uint64_t reserved2;
+        uint16_t reserved3;
+        uint16_t iopb_offset;
+    } __attribute__((packed));
+
     struct gdt_ptr
     {
         uint16_t limit;
@@ -55,9 +68,12 @@ extern "C"
 
     void gdt_init();
     void gdt_set_gate(int32_t num, uint64_t base, uint32_t limit, uint8_t access, uint8_t gran);
-
     void gdt_set_tss(int32_t num, uint64_t base, uint32_t limit);
+    
     extern void gdt_flush(uintptr_t);
+    extern void tss_load();
+    
+    void tss_set_stack(uintptr_t stack);
 }
 
 #endif      // _KERNEL_GDT_H

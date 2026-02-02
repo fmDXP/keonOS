@@ -41,6 +41,7 @@ BOOT_DIR = boot
 INCLUDE_DIR = include
 LIBC_INCLUDE = include/libc
 LIBC_DIR = libc
+SYSCALLS_DIR = kernel/syscalls
 DRIVERS_DIR = drivers
 BUILD_DIR = build
 KERNEL_DIR = kernel
@@ -58,7 +59,7 @@ HDA_IMG = harddisk.img
 HDA_SIZE = 64
 
 
-SRC_C = $(wildcard $(KERNEL_DIR)/*.cpp) $(wildcard $(FS_DIR)/*.cpp) $(wildcard $(LIBC_DIR)/*/*.cpp) $(wildcard $(DRIVERS_DIR)/*.cpp) $(wildcard $(ARCH_DIR)/$(ARCH_TO_COMPILE)/*.cpp) $(wildcard $(MM_DIR)/*.cpp) $(wildcard $(PROC_DIR)/*.cpp) 
+SRC_C = $(wildcard $(KERNEL_DIR)/*.cpp) $(wildcard $(FS_DIR)/*.cpp) $(wildcard $(LIBC_DIR)/*/*.cpp) $(wildcard $(DRIVERS_DIR)/*.cpp) $(wildcard $(ARCH_DIR)/$(ARCH_TO_COMPILE)/*.cpp) $(wildcard $(MM_DIR)/*.cpp) $(wildcard $(PROC_DIR)/*.cpp) $(wildcard $(SYSCALLS_DIR)/*.cpp)
 OBJ_C = $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(SRC_C))
 
 SRC_ASM = $(wildcard $(BOOT_DIR)/*.asm)	$(wildcard $(ARCH_DIR)/$(ARCH_TO_COMPILE)/asm/*.asm)
@@ -110,7 +111,7 @@ $(HDA_IMG):
 	@parted -s $(HDA_IMG) mklabel msdos
 	@parted -s $(HDA_IMG) mkpart primary fat32 1MiB 100%
 	@mformat -i $(HDA_IMG)@@1M -F -v "KEONOS" ::
-	@echo "Welcome to keonOS v0.4-alpha! Type 'help' to start exploring" > temp_readme.txt
+	@echo "Welcome to keonOS v0.5-alpha! Type 'help' to start exploring" > temp_readme.txt
 	@mcopy -i $(HDA_IMG)@@1M temp_readme.txt ::/readme.txt
 	@rm temp_readme.txt
 	@echo "Hard disk created."

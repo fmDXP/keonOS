@@ -55,6 +55,7 @@ void rewind(FILE* stream);
 int printf(const char* format, ...);
 int vprintf(const char* format, va_list arg);
 int putchar(int);
+int getchar(void);
 int puts(const char*);
 
 #ifdef __cplusplus

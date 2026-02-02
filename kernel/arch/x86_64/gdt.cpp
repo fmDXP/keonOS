@@ -20,22 +20,24 @@
 
 
 #include <kernel/arch/x86_64/gdt.h>
+#include <string.h>
 
-alignas(16) gdt_entry gdt[7]; 
+alignas(16) gdt_entry gdt[10]; 
 gdt_ptr gp;
+tss_entry kernel_tss;
 
 void gdt_set_tss(int32_t num, uint64_t base, uint32_t limit) 
 {
-    gdt_tss_entry* tss = (gdt_tss_entry*)&gdt[num];
+    gdt_tss_descriptor* tss_desc = (gdt_tss_descriptor*)&gdt[num];
 
-    tss->limit_low = limit & 0xFFFF;
-    tss->base_low  = base & 0xFFFF;
-    tss->base_mid  = (base >> 16) & 0xFF;
-    tss->access    = 0x89;
-    tss->granularity = ((limit >> 16) & 0x0F);
-    tss->base_high   = (base >> 24) & 0xFF;
-    tss->base_upper  = (base >> 32) & 0xFFFFFFFF;
-    tss->reserved    = 0;
+    tss_desc->limit_low     = limit & 0xFFFF;
+    tss_desc->base_low      = base & 0xFFFF;
+    tss_desc->base_mid      = (base >> 16) & 0xFF;
+    tss_desc->access        = 0x89;
+    tss_desc->granularity   = ((limit >> 16) & 0x0F);
+    tss_desc->base_high     = (base >> 24) & 0xFF;
+    tss_desc->base_upper    = (base >> 32) & 0xFFFFFFFF;
+    tss_desc->reserved      = 0;
 }
 
 void gdt_set_gate(int32_t num, uint64_t base, uint32_t limit, uint8_t access, uint8_t gran)
@@ -52,24 +54,29 @@ void gdt_set_gate(int32_t num, uint64_t base, uint32_t limit, uint8_t access, ui
 }
 
 
+void tss_set_stack(uintptr_t stack) 
+{
+    kernel_tss.rsp0 = stack & ~0xFULL;
+}
+
+
 void gdt_init()
 {
-    gp.limit = (sizeof(gdt) - 1);
-    gp.base  = reinterpret_cast<uintptr_t>(&gdt);
+    memset(gdt, 0, sizeof(gdt));
 
-    gdt_set_gate(0, 0, 0, 0, 0);
+    gdt_set_gate(0, 0, 0, 0, 0);                
+    gdt_set_gate(1, 0, 0, 0x9A, 0x20);          
+    gdt_set_gate(2, 0, 0, 0x92, 0x00);          
+    gdt_set_gate(3, 0, 0, 0xF2, 0x00); // UData (Indice 3)
+    gdt_set_gate(4, 0, 0, 0xFA, 0x20); // UCode (Indice 4)
 
-    // 0x08: Kernel Code Segment (L-bit = 1)
-    gdt_set_gate(1, 0, 0, 0x9A, 0x20); 
+    kernel_tss.iopb_offset = sizeof(tss_entry);
 
-    // 0x10: Kernel Data Segment
-    gdt_set_gate(2, 0, 0, 0x92, 0x00); 
+    gdt_set_tss(5, (uintptr_t)&kernel_tss, sizeof(tss_entry) - 1);
 
-    // 0x18: User Code Segment (DPL = 3)
-    gdt_set_gate(3, 0, 0, 0xFA, 0x20); 
+    gp.limit = (8 * 7) - 1; 
+    gp.base  = (uintptr_t)&gdt;
 
-    // 0x20: User Data Segment (DPL = 3)
-    gdt_set_gate(4, 0, 0, 0xF2, 0x00); 
-
-    gdt_flush(reinterpret_cast<uintptr_t>(&gp));	// Load the GDT
+    gdt_flush((uintptr_t)&gp);
+    tss_load();
 }

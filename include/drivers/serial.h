@@ -27,5 +27,7 @@ void serial_install();
 int is_transmit_empty();
 void write_serial(char a);
 void serial_putc(char c);
+int serial_received();
+char serial_getc();
 
 #endif		// SERIAL_H

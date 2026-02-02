@@ -1,5 +1,5 @@
 ; *****************************************************************************
-; * keonOS - kernel/arch/x86_64/asm/switch.asm
+; * keonOS - kernel/arch/x86_64/asm/tss_flush.asm
 ; * Copyright (C) 2025-2026 fmdxp
 ; *
 ; * This program is free software: you can redistribute it and/or modify
@@ -19,30 +19,9 @@
 ; *****************************************************************************
 
 [BITS 64]
-global switch_context
-global user_thread_entry
+global tss_load
 
-switch_context:
-    pushfq
-    push r15
-    push r14
-    push r13
-    push r12
-    push rbx
-    push rbp
-
-    mov [rdi], rsp
-    mov rsp, rsi
-
-    pop rbp
-    pop rbx
-    pop r12
-    pop r13
-    pop r14
-    pop r15
-    popfq
-
+tss_load:
+    mov ax, 0x28
+    ltr ax
     ret
-
-user_thread_entry:
-    iretq

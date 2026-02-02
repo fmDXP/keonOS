@@ -40,6 +40,23 @@ int is_transmit_empty()
     return inb(COM1 + 5) & 0x20;
 }
 
+int serial_received() 
+{
+   return inb(COM1 + 5) & 1;
+}
+
+char read_serial() 
+{
+   while (serial_received() == 0);
+   return inb(COM1);
+}
+
+char serial_getc()
+{
+    if (serial_received()) return inb(COM1);
+    return 0;
+}
+
 void write_serial(char a) 
 {
     while (is_transmit_empty() == 0);

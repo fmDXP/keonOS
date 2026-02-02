@@ -27,7 +27,7 @@
 #include <stdint.h>
 #include <string.h>
 
-static pt_entry* pml4 = nullptr;
+static pt_entry* kernel_pml4 = nullptr;
 static uint64_t total_frames = 0;
 static uint64_t used_frames = 0;
 static uint64_t mapped_pages = 0;
@@ -35,11 +35,12 @@ static uint64_t mapped_pages = 0;
 static uint32_t* frame_bitmap = nullptr;
 static uint64_t frame_bitmap_size = 0;
 
-static spinlock_t paging_lock = {0};
-static spinlock_t pfa_lock = {0};
+static spinlock_t paging_lock = {0, 0};
+static spinlock_t pfa_lock = {0, 0};
 
-static inline void* phys_to_virt(uintptr_t phys) { return (void*)(phys + KERNEL_VIRT_OFFSET); }
-static inline uintptr_t virt_to_phys(void* virt) { return (uintptr_t)virt - KERNEL_VIRT_OFFSET; }
+extern "C" uint64_t _kernel_virtual_start;
+extern "C" uint64_t _kernel_physical_start;
+extern "C" uint64_t _kernel_end;
 
 
 void pfa_mark_used(uintptr_t frame_start, uint64_t frame_count) 
@@ -89,12 +90,14 @@ void* pfa_alloc_frame()
                 frame_bitmap[i] |= (1 << bit);
                 used_frames++;
                 spin_unlock(&pfa_lock);
-                return (void*)(frame * PAGE_SIZE);
+                void* phys_ptr = (void*)(frame * PAGE_SIZE);
+                memset(phys_to_virt((uintptr_t)phys_ptr), 0, PAGE_SIZE);
+                return phys_ptr;
             }
         }
     }
     spin_unlock(&pfa_lock);
-    return nullptr; // Out of Memory
+    return nullptr;
 }
 
 void pfa_init_from_multiboot2(void* mb2_ptr) 
@@ -125,10 +128,8 @@ void pfa_init_from_multiboot2(void* mb2_ptr)
     total_frames = mem_upper / PAGE_SIZE;
     frame_bitmap_size = (total_frames / 32) + 1;
 
-    extern uint64_t _kernel_end; 
     uintptr_t kernel_end_phys = virt_to_phys(&_kernel_end);
-    frame_bitmap = (uint32_t*)phys_to_virt(kernel_end_phys + 0x2000);
-    
+    frame_bitmap = (uint32_t*)phys_to_virt(kernel_end_phys + 0x1000);
     memset(frame_bitmap, 0xFF, frame_bitmap_size * 4);
     used_frames = total_frames;
 
@@ -158,52 +159,92 @@ void pfa_init_from_multiboot2(void* mb2_ptr)
 			}
     	}
 
-    pfa_mark_used(0, 256); // BIOS/EBDA/Video
-    pfa_mark_used(kernel_end_phys, (frame_bitmap_size * 4 / PAGE_SIZE) + 4);
-    pfa_mark_used(virt_to_phys(mb2_ptr), 16);
+    pfa_mark_used(0, 256);
+
+    uintptr_t kernel_start_phys = (uintptr_t)&_kernel_physical_start;
+    uint64_t kernel_pages = (kernel_end_phys - kernel_start_phys) / PAGE_SIZE + 2;
+    pfa_mark_used(kernel_start_phys, kernel_pages);
+
+    pfa_mark_used(virt_to_phys(frame_bitmap), (frame_bitmap_size * 4 / PAGE_SIZE) + 1);
+    pfa_mark_used(virt_to_phys(mb2_ptr), 64);
+
+    for (tag = (struct multiboot_tag *)((uint8_t*)mb2_ptr + 8);
+         tag->type != MULTIBOOT_TAG_TYPE_END;
+         tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) 
+         {
+            if (tag->type == MULTIBOOT_TAG_TYPE_MODULE) 
+            {
+                auto mod_tag = (multiboot_tag_module *)tag;
+                uintptr_t m_start = mod_tag->mod_start;
+                uint32_t m_size = mod_tag->mod_end - mod_tag->mod_start;
+                uint64_t m_pages = (m_size + 4095) / 4096;
+                
+                pfa_mark_used(m_start, m_pages);
+            }
+        }
 }
 
-static pt_entry* get_pte(void* virtual_addr, bool create) 
+static pt_entry* get_pte(pt_entry* pml4_base, void* virtual_addr, bool create, uint64_t flags = 0)
 {
-    pt_entry* table = pml4;
+    pt_entry* table = pml4_base;
     uintptr_t addr = (uintptr_t)virtual_addr;
-    uintptr_t indices[3] = { PML4_IDX(addr), PDPT_IDX(addr), PD_IDX(addr) };
+    uintptr_t indices[4] = 
+    {
+        PML4_IDX(addr),
+        PDPT_IDX(addr),
+        PD_IDX(addr),
+        PT_IDX(addr)
+    };
 
     for (int i = 0; i < 3; i++) 
 	{
         if (!(table[indices[i]] & PTE_PRESENT)) 
-		{
+        {
             if (!create) return nullptr;
             void* new_tab_phys = pfa_alloc_frame();
             if (!new_tab_phys) return nullptr;
             
-            memset(phys_to_virt((uintptr_t)new_tab_phys), 0, PAGE_SIZE);
-            table[indices[i]] = (uintptr_t)new_tab_phys | PTE_PRESENT | PTE_RW | PTE_USER;
+            table[indices[i]] = (uintptr_t)new_tab_phys | PTE_PRESENT | PTE_RW | (flags & PTE_USER);
+        }
+        else
+        {
+            if (flags & PTE_USER) table[indices[i]] |= PTE_USER;
         }
         table = (pt_entry*)phys_to_virt(table[indices[i]] & ~0xFFFULL);
     }
-    return &table[PT_IDX(addr)];
+    return &table[indices[3]];
+}
+
+static pt_entry* get_current_pml4_virt() 
+{
+    uintptr_t cr3;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    return (pt_entry*)phys_to_virt(cr3 & ~0xFFFULL);
 }
 
 void paging_map_page(void* virt, void* phys, uint64_t flags) 
 {
     spin_lock(&paging_lock);
-    pt_entry* pte = get_pte(virt, true);
+    pt_entry* pte = get_pte(get_current_pml4_virt(), virt, true, flags);
     if (pte) 
-	{
+    {
         *pte = ((uintptr_t)phys & ~0xFFFULL) | flags | PTE_PRESENT;
         mapped_pages++;
+
+        // Use invlpg to invalidate the TLB for this specific address
+        // This is much faster than reloading CR3 (which flushes the entire TLB)
         asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
     }
     spin_unlock(&paging_lock);
 }
 
+
 void paging_unmap_page(void* virt) 
 {
     spin_lock(&paging_lock);
-    pt_entry* pte = get_pte(virt, false);
+    pt_entry* pte = get_pte(get_current_pml4_virt(), virt, false);
     if (pte && (*pte & PTE_PRESENT)) 
-	{
+    {
         *pte = 0;
         mapped_pages--;
         asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
@@ -211,10 +252,23 @@ void paging_unmap_page(void* virt)
     spin_unlock(&paging_lock);
 }
 
+void* paging_create_address_space() 
+{
+    void* new_pml4_phys = pfa_alloc_frame();
+    pt_entry* new_pml4_virt = (pt_entry*)phys_to_virt((uintptr_t)new_pml4_phys);
+    
+    memset(new_pml4_virt, 0, PAGE_SIZE);
+
+    for (int i = 256; i < 512; i++)
+        new_pml4_virt[i] = kernel_pml4[i];
+
+    return new_pml4_phys;
+}
+
 void* paging_get_physical_address(void* virt) 
 {
     spin_lock(&paging_lock);
-    pt_entry* pte = get_pte(virt, false);
+    pt_entry* pte = get_pte(get_current_pml4_virt(), virt, false);
     void* phys = nullptr;
     if (pte && (*pte & PTE_PRESENT)) phys = (void*)((*pte & ~0xFFFULL) + ((uintptr_t)virt & 0xFFF));
     spin_unlock(&paging_lock);
@@ -239,14 +293,64 @@ void paging_get_stats(struct paging_stats* stats)
     stats->mapped_pages = mapped_pages;
 }
 
+void paging_make_kernel_user_accessible() 
+{
+    // Map the kernel address space as user-readable/executable
+    // This allows Ring 3 threads to execute the shell code currently located in the kernel binary.
+    uintptr_t k_start = 0xffffffff80100000;
+    uintptr_t k_end = (uintptr_t)&_kernel_end + 0x40000; // 256KB extra (covers help strings)
+    
+    // Ensure we map in 4KB chunks
+    k_start &= ~0xFFFULL;
+    k_end = (k_end + 0xFFF) & ~0xFFFULL;
+
+    for (uintptr_t p = k_start; p < k_end; p += 4096)
+    {
+        paging_map_page((void*)p, (void*)virt_to_phys((void*)p), PTE_PRESENT | PTE_RW | PTE_USER);
+    }
+}
+
+
+bool paging_is_user_accessible(void* virt)
+{
+    pt_entry* table = get_current_pml4_virt();
+    uintptr_t addr = (uintptr_t)virt;
+    uintptr_t indices[4] = { PML4_IDX(addr), PDPT_IDX(addr), PD_IDX(addr), PT_IDX(addr) };
+
+    for (int i = 0; i < 4; i++) 
+    {
+        if (!(table[indices[i]] & PTE_PRESENT)) return false;
+        if (!(table[indices[i]] & PTE_USER)) return false;
+        if (i < 3) table = (pt_entry*)phys_to_virt(table[indices[i]] & ~0xFFFULL);
+    }
+    return true;
+}
+
+
 void paging_init() 
 {
-    uintptr_t cr3;
-    asm volatile("mov %%cr3, %0" : "=r"(cr3));
-    pml4 = (pt_entry*)phys_to_virt(cr3 & ~0xFFFULL);
-
+    void* new_pml4_phys = pfa_alloc_frame();
+    kernel_pml4 = (pt_entry*)phys_to_virt((uintptr_t)new_pml4_phys);
+    memset(kernel_pml4, 0, PAGE_SIZE);
+    
     for (uintptr_t p = 0; p < 512 * 1024 * 1024; p += PAGE_SIZE)
-        paging_map_page(phys_to_virt(p), (void*)p, PTE_PRESENT | PTE_RW);
+    {
+        pt_entry* pte1 = get_pte(kernel_pml4, (void*)p, true, PTE_PRESENT | PTE_RW);
+        *pte1 = p | PTE_PRESENT | PTE_RW;
 
-    printf("[PAGING] Physic PML4 at 0x%lx\n", cr3 & ~0xFFFULL);
+        pt_entry* pte2 = get_pte(kernel_pml4, phys_to_virt(p), true, PTE_PRESENT | PTE_RW);
+        *pte2 = p | PTE_PRESENT | PTE_RW;
+    }
+
+    for (uintptr_t p = 0; p < 1024 * 1024; p += PAGE_SIZE) 
+        paging_map_page((void*)(0xffffffffc0000000 + p), (void*)p, PTE_PRESENT | PTE_RW);
+
+    uintptr_t vga_phys = 0xB8000;
+    uintptr_t vga_virt = 0xffffffff800b8000;
+
+    pt_entry* vga_pte = get_pte(kernel_pml4, (void*)vga_virt, true, PTE_PRESENT | PTE_RW);
+    *vga_pte = vga_phys | PTE_PRESENT | PTE_RW;
+    asm volatile("mov %0, %%cr3" : : "r"(new_pml4_phys) : "memory");
+
+    printf("[PAGING] Paging active\n");
 }

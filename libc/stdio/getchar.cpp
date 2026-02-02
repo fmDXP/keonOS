@@ -1,5 +1,5 @@
 /*
- * keonOS - include/kernel/kernel.h
+ * keonOS - libc/stdio/getchar.cpp
  * Copyright (C) 2025-2026 fmdxp
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,26 +18,30 @@
  * See the GNU General Public License for more details.
  */
 
-#ifndef KERNEL_H
-#define KERNEL_H
+#include <stdio.h>
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
-#include <drivers/multiboot2.h>
-
-#if defined(__linux__)
-#error "You are not using a cross-compiler, keonOS can't compile. Aborting..."
+#if defined(__is_libk)
+#include <drivers/keyboard.h>
 #endif
+#include <sys/syscall.h>
 
-#if !defined(__x86_64__)
-#error "keonOS needs to be compiled with a x86-elf (cross-)compiler. Aborting..."
+int getchar(void) 
+{
+    uint16_t cs;
+    asm volatile("mov %%cs, %0" : "=r"(cs));
+    if ((cs & 3) == 3) 
+    {
+        char c;
+        if (syscall(SYS_READ, 0, (uint64_t)&c, 1, 0, 0, 0) == 1) return (int)c;
+        return -1;
+    }
+
+#if defined(__is_libk)
+	return (int) keyboard_getchar();
+#else
+	char c;
+	size_t bytes_read = syscall(SYS_READ, 0, (uint64_t)&c, 1, 0, 0, 0);
+	if (bytes_read == 1) return (int) c;
+	return -1;
 #endif
-
-
-
-
-void init_file_system(void* ramdisk_vaddr);
-extern "C" void kernel_main(uint64_t magic, uint64_t multiboot_phys_addr);
-
-#endif		// KERNEL_H
+}

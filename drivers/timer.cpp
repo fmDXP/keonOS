@@ -22,6 +22,7 @@
 #include <kernel/arch/x86_64/thread.h>
 #include <kernel/arch/x86_64/idt.h>
 #include <drivers/timer.h>
+#include <stdio.h>
 
 static volatile uint32_t timer_ticks = 0;
 static volatile uint32_t timer_hz = 0;

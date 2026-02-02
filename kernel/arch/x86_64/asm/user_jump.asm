@@ -1,5 +1,5 @@
 ; *****************************************************************************
-; * keonOS - kernel/arch/x86_64/asm/switch.asm
+; * keonOS - kernel/arch/x86_64/asm/user_jump.asm
 ; * Copyright (C) 2025-2026 fmdxp
 ; *
 ; * This program is free software: you can redistribute it and/or modify
@@ -19,30 +19,31 @@
 ; *****************************************************************************
 
 [BITS 64]
-global switch_context
-global user_thread_entry
+global jump_to_user
 
-switch_context:
-    pushfq
-    push r15
-    push r14
-    push r13
-    push r12
-    push rbx
-    push rbp
+jump_to_user:
+    mov ax, 0x1B
+    push rax
+    push rsi
+    
+    pushf
+    pop rax
+    or rax, 0x200
+    push rax
+    
+    mov ax, 0x23
+    push rax
+    
+    push rdi
 
-    mov [rdi], rsp
-    mov rsp, rsi
+    mov ax, 0x1B
+    mov ds, ax
+    mov es, ax
 
-    pop rbp
-    pop rbx
-    pop r12
-    pop r13
-    pop r14
-    pop r15
-    popfq
-
-    ret
-
-user_thread_entry:
+    xor ax, ax
+    mov fs, ax
+    mov gs, ax
+    
+    ud2
+    
     iretq

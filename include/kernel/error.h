@@ -47,7 +47,10 @@ enum class KernelError : uint32_t
     K_ERR_UNKNOWN_ERROR,
 };
 
-extern "C" void panic(KernelError error, const char* message, uint32_t error_code);
+// Forward declaration of panic with default arguments
+// This is the single source of truth for the panic signature
+struct registers_t;
+extern "C" void panic(KernelError error, const char* message = nullptr, uint32_t error_code = 0UL, struct registers_t* regs = nullptr);
 
 inline const char* kerror_to_str(KernelError err)
 {

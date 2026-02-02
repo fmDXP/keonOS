@@ -20,10 +20,14 @@
 
 
 #include <kernel/arch/x86_64/thread.h>
+#include <kernel/arch/x86_64/gdt.h>
+#include <kernel/arch/x86_64/paging.h>
 #include <kernel/constants.h>
 #include <kernel/panic.h>
 #include <kernel/error.h>
+#include <kernel/syscalls/syscalls.h>
 #include <mm/heap.h>
+#include <sys/errno.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -32,58 +36,15 @@ static thread_t* current_thread = nullptr;
 static thread_t* idle_thread_ptr = nullptr;
 static uint32_t next_thread_id = 0;
 
+spinlock_t thread_list_lock = {0, 0};
+spinlock_t zombie_lock = {0, 0};
+thread_t* zombie_list_head = nullptr;
+
 extern "C" void switch_context(uint64_t** old_rsp, uint64_t* new_rsp);
+extern "C" void user_thread_entry();
+extern "C" tss_entry kernel_tss;
 
-
-void cleanup_zombies() 
-{
-    if (!current_thread) return;
-
-    thread_t* prev = idle_thread_ptr;
-    thread_t* curr = idle_thread_ptr->next;
-    uint32_t started_id = idle_thread_ptr->id;
-
-    do 
-    {
-        if (curr->state == THREAD_ZOMBIE) 
-        {
-            prev->next = curr->next;
-            
-            printf("[reaper] Thread %d (%s) cleaned up. Exit code: %d\n", 
-                   curr->id, curr->name, curr->exit_code);
-
-            if (curr->stack_start) kfree(curr->stack_start);
-            thread_t* to_free = curr;
-            curr = curr->next; 
-            kfree(to_free);
-            continue; 
-        }
-        prev = curr;
-        curr = curr->next;
-    } while (curr != idle_thread_ptr);
-}
-
-
-void thread_init()
-{
-    current_thread = (thread_t*)kmalloc(sizeof(thread_t));
-    memset(current_thread, 0, sizeof(thread_t));
-    
-    current_thread->id = next_thread_id++;
-    current_thread->state = THREAD_READY;
-    current_thread->next = current_thread;
-    current_thread->stack_start = nullptr; 
-
-    strcpy(current_thread->name, "kernel");
-    
-    idle_thread_ptr = thread_create(idle_task, "sys_idle");
-    if (idle_thread_ptr)
-    {
-        idle_thread_ptr->next = current_thread->next;
-        current_thread->next = idle_thread_ptr;
-    }
-}
-
+ 
 void spin_lock_irqsave(spinlock_t* lock)
 {
     uint64_t rflags;
@@ -112,48 +73,100 @@ void spin_unlock(spinlock_t* lock)
     __sync_lock_release(&lock->locked);
 }
 
-
-thread_t* thread_add(void(*entry_point)(), const char* name)
+void cleanup_zombies() 
 {
-    asm volatile("cli");
-    thread_t* t = thread_create(entry_point, name);
+    spin_lock_irqsave((spinlock_t*)&zombie_lock);
+    thread_t* curr = zombie_list_head;
+    zombie_list_head = nullptr;
+    spin_unlock_irqrestore((spinlock_t*)&zombie_lock);
+
+    while (curr) 
+    {
+        thread_t* next = curr->next;
+        printf("[reaper] Cleaning %d (%s). Exit code: %d\n", curr->id, curr->name, curr->exit_code);
+        
+        if (curr->stack_start) kfree(curr->stack_start);
+        kfree(curr);
+        
+        curr = next;
+    }
+}
+
+void thread_init()
+{
+    current_thread = (thread_t*)kmalloc(sizeof(thread_t));
+    memset(current_thread, 0, sizeof(thread_t));
+    
+    current_thread->id = next_thread_id++;
+    current_thread->state = THREAD_READY;
+    current_thread->next = current_thread;
+    current_thread->stack_start = nullptr; 
+
+    strcpy(current_thread->name, "kernel");
+    
+    idle_thread_ptr = thread_create(idle_task, "sys_idle");
+    if (idle_thread_ptr)
+    {
+        idle_thread_ptr->next = current_thread->next;
+        current_thread->next = idle_thread_ptr;
+    }
+}
+
+thread_t* thread_add(void(*entry_point)(), const char* name, bool is_user)
+{
+    spin_lock_irqsave((spinlock_t*)&thread_list_lock);
+
+    thread_t* t = is_user ? thread_create_user(entry_point, name) : thread_create(entry_point, name);
     if (t)
     {
         t->id = next_thread_id++;
         t->next = current_thread->next;
         current_thread->next = t;
     }
-    asm volatile("sti");
+    spin_unlock_irqrestore((spinlock_t*)&thread_list_lock);
+    
     return t;
 }
 
 extern "C" void yield()
 {
-    if (!current_thread) return;
+    
+    if (!current_thread || !idle_thread_ptr) return;
 
     asm volatile("cli");
     
     thread_t* prev = current_thread;
     thread_t* next_to_run = nullptr;
     
-    thread_t* scan = prev->next;
+    thread_t* start_node = (prev->state == THREAD_ZOMBIE) ? idle_thread_ptr : prev;
+    thread_t* scan = start_node->next;
+
     do 
     {
         if (scan->state == THREAD_SLEEPING && scan->sleep_ticks == 0)
             scan->state = THREAD_READY;
         scan = scan->next;
-    } while (scan != prev->next);
+    } while (scan != start_node->next);
     
-    scan = prev->next;
+    scan = start_node->next;
+
+    
+    scan = start_node->next;
+
     do 
     {
+        if (scan->id == 2 && scan->state == THREAD_BLOCKED) 
+        {
+            scan->state = THREAD_READY;
+        }
+
         if (scan->state == THREAD_READY && scan != idle_thread_ptr) 
         {
             next_to_run = scan;
             break;
         }
         scan = scan->next;
-    } while (scan != prev->next);
+    } while (scan != start_node->next);
 
     if (!next_to_run) 
     {
@@ -164,6 +177,17 @@ extern "C" void yield()
     if (next_to_run != prev) 
     {
         current_thread = next_to_run;
+
+        // If it's a user thread, we must update RSP0 in TSS so that
+        // interrupts in Ring 3 can correctly return to the kernel stack.
+        // We also update the GS base used by 'syscall' instruction.
+        uint64_t kstack = (uint64_t)next_to_run->stack_start + 16384;
+        
+        if (next_to_run->is_user)
+            kernel_tss.rsp0 = kstack;
+        
+        syscall_set_kernel_stack(kstack);
+        
         switch_context(&(prev->rsp), next_to_run->rsp);
     }
 
@@ -192,9 +216,11 @@ thread_t* thread_create(void (*entry_point)(), const char* name)
     
     memset(t, 0, sizeof(thread_t));
     t->stack_start = stack;
+    t->is_user = false;
     t->state = THREAD_READY;
     t->sleep_ticks = 0;
     t->exit_code = 0;
+    t->user_heap_break = 0;
 
     if (name) strncpy(t->name, name, 15);
     else strcpy(t->name, "unk");
@@ -216,6 +242,61 @@ thread_t* thread_create(void (*entry_point)(), const char* name)
     return t;
 }
 
+thread_t* thread_create_user(void (*entry_point)(), const char* name) 
+{
+    thread_t* t = (thread_t*)kmalloc(sizeof(thread_t));
+    uint64_t* k_stack = (uint64_t*)kmalloc(16384); // Stack Kernel (Ring 0)
+    
+    // Increase user stack to 16KB (4 pages)
+    uintptr_t u_stack_virt = 0x0000700000000000;
+    for (int i = 0; i < 4; i++) 
+    {
+        void* u_stack_phys = pfa_alloc_frame();
+        paging_map_page((void*)(u_stack_virt + i * 4096), u_stack_phys, PTE_PRESENT | PTE_RW | PTE_USER);
+    }
+    uintptr_t u_stack_top = u_stack_virt + 16384;
+
+    memset(t, 0, sizeof(thread_t));
+    t->is_user = true;
+    t->state = THREAD_READY;
+    t->stack_start = k_stack;
+    t->user_stack = (uint64_t*)u_stack_top;
+    t->user_heap_break = 0x600000;
+    strncpy(t->name, name, 15);
+
+    uint64_t* sp = (uint64_t*)((uintptr_t)k_stack + 16384);
+
+    *(--sp) = 0x1B;                     // SS (User Data + RPL 3)
+    *(--sp) = u_stack_top;              // RSP Utente
+    *(--sp) = 0x202;                    // RFLAGS (Interrupt abilitati in Ring 3)
+    *(--sp) = 0x23;                     // CS (User Code + RPL 3)
+    *(--sp) = (uintptr_t)entry_point;   // RIP
+
+    *(--sp) = (uint64_t)user_thread_entry;
+
+    *(--sp) = 0x202; // RFLAGS (Quello che verrà estratto da popfq)
+    *(--sp) = 0;     // R15
+    *(--sp) = 0;     // R14
+    *(--sp) = 0;     // R13
+    *(--sp) = 0;     // R12
+    *(--sp) = 0;     // RBX
+    *(--sp) = 0;     // RBP
+
+    
+    t->rsp = sp;
+    return t;
+}
+
+void user_test_thread() 
+{
+    uint16_t cs;
+    asm volatile("mov %%cs, %0" : "=r"(cs));
+    
+    if ((cs & 0x3) == 3) {} else {}
+
+    while(1) asm volatile("nop");
+}
+
 void idle_task() 
 {
     while (1) 
@@ -230,7 +311,7 @@ void idle_task()
 thread_t* thread_get_current() { return current_thread; }
 thread_t* get_idle_thread_ptr() { return idle_thread_ptr; }
 
-uint32_t thread_get_id_by_name(const char* name) 
+uint32_t thread_get_id_by_name(const char* name)
 {
     if (!current_thread || !name) return THREAD_NOT_FOUND;
     thread_t* temp = current_thread;
@@ -255,8 +336,7 @@ bool thread_kill(uint32_t id)
 {
     if (id == current_thread->id || id == idle_thread_ptr->id || id == 0) return false; 
 
-    uint64_t rflags;
-    asm volatile("pushfq; popq %0; cli" : "=rm"(rflags));
+    spin_lock_irqsave((spinlock_t*)&thread_list_lock);
 
     thread_t* prev = current_thread;
     thread_t* curr = current_thread->next;
@@ -267,8 +347,15 @@ bool thread_kill(uint32_t id)
         if (curr->id == id) 
 		{
             prev->next = curr->next;
-            if (curr->stack_start) kfree(curr->stack_start);
-            kfree(curr);
+
+            curr->state = THREAD_ZOMBIE;
+            curr->exit_code = -1;
+
+            spin_lock(&zombie_lock);
+            curr->next = zombie_list_head;
+            zombie_list_head = curr;
+            spin_unlock(&zombie_lock);
+
             found = true;
             break;
         }
@@ -276,7 +363,7 @@ bool thread_kill(uint32_t id)
         curr = curr->next;
     } while (curr != current_thread);
 
-    asm volatile("pushq %0; popfq" : : "rm"(rflags));
+    spin_unlock_irqrestore((spinlock_t*)&thread_list_lock);
     return found;
 }
 
@@ -296,6 +383,7 @@ void thread_print_list()
             case THREAD_RUNNING:  state_str = "RUNN "; break;
             case THREAD_SLEEPING: state_str = "SLEEP"; break;
             case THREAD_BLOCKED:  state_str = "BLOCK"; break;
+            case THREAD_ZOMBIE:   state_str = "ZOMB "; break; 
             default:              state_str = "UNKN "; break;
         }
         printf("  %d    %-15s %-10s 0x%lx\n", (int)t->id, t->name, state_str, (uint64_t)t->rsp);
@@ -305,15 +393,27 @@ void thread_print_list()
 
 void thread_exit(int code)
 {
-    asm volatile("cli");
-    thread_t* self = current_thread;
+    spin_lock_irqsave((spinlock_t*)&thread_list_lock);
 
+    thread_t* self = current_thread;
     self->exit_code = code;
     self->state = THREAD_ZOMBIE;
 
     if (self->id == 0 || self == idle_thread_ptr) 
         panic(KernelError::K_ERR_SYSTEM_THREAD_EXIT_ATTEMPT);
+
+    thread_t* prev = self;
+    while (prev->next != self)
+        prev = prev->next;
     
+    prev->next = self->next;
+    
+    spin_lock(&zombie_lock);
+    self->next = zombie_list_head;
+    zombie_list_head = self;
+    spin_unlock(&zombie_lock);
+
+    spin_unlock_irqrestore((spinlock_t*)&thread_list_lock);
 
     yield();
     __builtin_unreachable();
@@ -330,4 +430,23 @@ void thread_wakeup_blocked()
 			temp->state = THREAD_READY;
 		temp = temp->next;
 	} while (temp != current_thread);
+}
+
+int64_t thread_kill_by_string(const char* input) 
+{
+    if (!input || input[0] == '\0') return -EINVAL;
+
+    uint32_t id;
+
+    if (input[0] >= '0' && input[0] <= '9') id = (uint32_t)atoi(input);
+    else 
+    {
+        id = thread_get_id_by_name(input);
+        if (id == THREAD_NOT_FOUND) return -ESRCH;
+        if (id == THREAD_AMBIGUOUS) return -E2BIG;
+    }
+
+    if (thread_kill(id)) return 0;
+    
+    return -EPERM;
 }

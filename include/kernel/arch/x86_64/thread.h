@@ -32,16 +32,23 @@ enum thread_state_t
     THREAD_ZOMBIE
 };
 
+#include <fs/vfs_node.h>
+
 struct thread_t 
 {
     uint64_t* rsp;
     uint32_t  id;
     char      name[16];
     uint64_t* stack_start;
+    uint64_t* user_stack;
+    bool      is_user;
     thread_t* next;
     thread_state_t state;
     uint32_t sleep_ticks;
     int      exit_code;
+    uintptr_t user_heap_break;
+    VFSNode* fd_table[16];
+    uint32_t fd_offset[16];
 };
 
 typedef struct 
@@ -58,7 +65,7 @@ void idle_task();
 extern "C" void yield();
 void thread_exit(int code);
 thread_t* thread_create(void (*entry_point)(), const char* name);
-thread_t* thread_add(void(*entry_point)(), const char* name);
+thread_t* thread_add(void(*entry_point)(), const char* name, bool is_user = false);
 bool      thread_kill(uint32_t id);
 void      thread_sleep(uint32_t ms);
 void      thread_wakeup_blocked();
@@ -71,5 +78,8 @@ void spin_unlock(spinlock_t* lock);
 void spin_lock_irqsave(spinlock_t* lock);
 void spin_unlock_irqrestore(spinlock_t* lock);
 void cleanup_zombies();
+int64_t thread_kill_by_string(const char* input);
+void user_test_thread();
+thread_t* thread_create_user(void (*entry_point)(), const char* name);
 
 #endif      // THREAD_H

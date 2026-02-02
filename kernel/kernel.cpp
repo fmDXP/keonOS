@@ -50,11 +50,15 @@
 #include <drivers/keyboard.h>
 #include <drivers/multiboot2.h>
 
+#include <kernel/syscalls/syscalls.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 extern "C" char _kernel_end;
+extern "C" tss_entry kernel_tss;
+
 
 void init_file_system(void* ramdisk_vaddr) 
 {
@@ -81,14 +85,12 @@ void init_file_system(void* ramdisk_vaddr)
                                        &fat32_inst.bpb);
         
         mnt_dir->add_child(fat_root);
-        printf("[FAT32] Hardware partition mounted in /mnt/fat32\n");
     }
 
     if (ramdisk_vaddr != nullptr) 
     {
         KeonFS_MountNode* ramfs_ptr = new KeonFS_MountNode("initrd", ramdisk_vaddr);
         root->register_node(ramfs_ptr);
-        printf("[RAMFS] Ramdisk loaded in /initrd\n");
     }
 }
 
@@ -102,6 +104,7 @@ extern "C" void kernel_main([[maybe_unused]] uint64_t magic, uint64_t multiboot_
 	serial_install();
 	gdt_init();
 	idt_init();
+
 
 	uint64_t total_mem_bytes = 0;
     uintptr_t rd_phys = 0;
@@ -139,23 +142,27 @@ extern "C" void kernel_main([[maybe_unused]] uint64_t magic, uint64_t multiboot_
 	
 	pfa_init_from_multiboot2((void*)multiboot_virt_addr);
 	paging_init();	
+    paging_make_kernel_user_accessible();
 
 	VMM::kernel_dynamic_break = ((uintptr_t)&_kernel_end + 0xFFF) & ~0xFFF;
 	VMM::kernel_dynamic_break += 0x10000;
 	
-	printf("[VMM] Kernel end: %p, Heap start: %p\n", &_kernel_end, VMM::kernel_dynamic_break);
 	void* heap_start = (void*)VMM::kernel_dynamic_break;
     uintptr_t initial_heap_size = 4 * 1024 * 1024;
 		
 	VMM::sbrk(initial_heap_size);
     kheap_init(heap_start, initial_heap_size);
+
+    void* kernel_stack_for_tss = kmalloc(4096);
+    uintptr_t kstack_top = (uintptr_t)kernel_stack_for_tss + 4096;
+    tss_set_stack(kstack_top);
+    syscall_init();
     
 	
 	// 4. Subsystem Initialization
 	timer_init(100);
 	thread_init();
 	keyboard_init();
-
 
 	void* ramdisk_vaddr = nullptr;
 	if (rd_phys != 0) 
@@ -178,11 +185,9 @@ extern "C" void kernel_main([[maybe_unused]] uint64_t magic, uint64_t multiboot_
     }
 
 	init_file_system(ramdisk_vaddr);
-		
 
 	// Re-enable interrupts after safe hardware/memory setup
 	asm volatile("sti");
-	
 	
 	// 5. User Interface & Branding
     // Show the boot splash screen and provide visual/auditory feedback (beep)
@@ -214,11 +219,13 @@ extern "C" void kernel_main([[maybe_unused]] uint64_t magic, uint64_t multiboot_
 	printf("This program comes with ABSOLUTELY NO WARRANTY.\n\n");
 	printf("Type 'help' for commands.\n");
 
+    
+    // Initialize User Mode
+    thread_add(start_user_code, "user_mode", false);
 
-	// 7. Launch First User Process
-    // Initialize the shell and add it as the primary thread to the scheduler
+	// 7. Launch Processes
 	shell_init();
-	thread_add(shell_run, "shell");
+    // shell_run is now launched from start_user_code in Ring 3.
 
 	// 8. Idle Loop
     // The main kernel thread enters a low-power halt loop
@@ -226,3 +233,4 @@ extern "C" void kernel_main([[maybe_unused]] uint64_t magic, uint64_t multiboot_
 	while (1) asm volatile("hlt");
 	
 }
+

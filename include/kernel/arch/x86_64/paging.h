@@ -21,9 +21,9 @@
 #ifndef PAGING_H
 #define PAGING_H
 
+#include <kernel/constants.h>
 #include <stdint.h>
 #include <stddef.h>
-
 
 enum PAGE_FLAGS 
 {
@@ -59,5 +59,18 @@ void paging_unmap_page(void* virt);
 void* paging_get_physical_address(void* virt);
 void paging_identity_map(uintptr_t start, uintptr_t size, uint64_t flags);
 void paging_get_stats(struct paging_stats* stats);
+void* paging_create_address_space();
+void paging_make_kernel_user_accessible();
+bool paging_is_user_accessible(void* virt);
+
+inline void* phys_to_virt(uintptr_t phys) 
+{ 
+    return (void*)(phys + KERNEL_VIRT_OFFSET); 
+}
+
+inline uintptr_t virt_to_phys(void* virt) 
+{ 
+    return (uintptr_t)virt - KERNEL_VIRT_OFFSET; 
+}
 
 #endif      // PAGING_H
